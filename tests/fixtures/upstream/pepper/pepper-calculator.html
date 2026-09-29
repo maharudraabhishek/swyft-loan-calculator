@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pepper Money Calculator - Loaded Commission</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 950px; margin: 0 auto; }
+        h1 { color: #e65100; margin-bottom: 8px; font-size: 1.5rem; }
+        .subtitle { color: #666; margin-bottom: 20px; font-size: 0.9rem; }
+        .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card-title { font-weight: 600; color: #1a1a2e; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e65100; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-size: 0.85rem; color: #555; margin-bottom: 4px; font-weight: 500; }
+        .form-group input, .form-group select { padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #e65100; }
+        .form-group .helper-text { font-size: 0.75rem; color: #888; margin-top: 4px; }
+        .checkbox-group { flex-direction: row; align-items: center; gap: 8px; }
+        .checkbox-group input { width: auto; }
+        .checkbox-group label { margin: 0; font-size: 0.9rem; }
+        .fee-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; padding: 12px; background: #fafafa; border-radius: 8px; margin-bottom: 8px; }
+        .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+        .result-item { background: #f8f9fa; padding: 12px; border-radius: 8px; }
+        .result-item.highlight { background: #fff3e0; border: 1px solid #e65100; }
+        .result-item.commission { background: #e8f5e9; border: 1px solid #4caf50; }
+        .result-item.rate { background: #e3f2fd; border: 1px solid #1976d2; }
+        .result-label { font-size: 0.75rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+        .result-value { font-size: 1.2rem; font-weight: 600; color: #1a1a2e; margin-top: 4px; }
+        .result-value.small { font-size: 1rem; }
+        .formula-box { background: #fff3e0; padding: 16px; border-radius: 8px; margin-top: 16px; border-left: 4px solid #e65100; }
+        .formula-box h4 { color: #e65100; margin-bottom: 12px; }
+        .formula-section { margin-bottom: 16px; }
+        .formula-section h5 { color: #333; margin-bottom: 8px; font-size: 0.9rem; }
+        .formula-line { font-family: 'Monaco', 'Consolas', monospace; font-size: 0.85rem; margin: 4px 0; color: #444; padding-left: 12px; }
+        .formula-note { font-size: 0.85rem; color: #666; font-style: italic; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Pepper Money Calculator</h1>
+        <p class="subtitle">Loaded Commission Model - Uses 0.4 loading factor to partially capitalise commission</p>
+
+        <div class="card">
+            <div class="card-title">Loan Details</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Finance Amount ($)</label>
+                    <input type="number" id="financeAmount" value="143000" step="100">
+                </div>
+                <div class="form-group">
+                    <label>Term (months)</label>
+                    <input type="number" id="termMonths" value="60" min="12" max="84">
+                </div>
+                <div class="form-group">
+                    <label>Financier/Base Rate (% annual)</label>
+                    <input type="number" id="financierRate" value="7.75" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Commission Amount ($)</label>
+                    <input type="number" id="commissionDollar" value="5895.40" step="0.01" min="0">
+                    <div class="helper-text" id="commissionPercentDisplay">= 0.00% of NAF</div>
+                </div>
+                <div class="form-group">
+                    <label>Payment Timing</label>
+                    <select id="paymentTiming">
+                        <option value="advance" selected>Advance (first payment at settlement)</option>
+                        <option value="arrears">Arrears (first payment after 1 month)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Balloon (%)</label>
+                    <input type="number" id="balloonPercent" value="0" step="5" min="0" max="50">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Fees (toggle which are financed)</div>
+            <div class="fee-row">
+                <div class="form-group">
+                    <label>Origination Fee ($)</label>
+                    <input type="number" id="originationFee" value="990" step="10">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="originationFinanced" checked>
+                    <label for="originationFinanced">Financed</label>
+                </div>
+            </div>
+            <div class="fee-row">
+                <div class="form-group">
+                    <label>Lender/Establishment Fee ($)</label>
+                    <input type="number" id="establishmentFee" value="499" step="10">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="establishmentFinanced" checked>
+                    <label for="establishmentFinanced">Financed</label>
+                </div>
+            </div>
+            <div class="fee-row">
+                <div class="form-group">
+                    <label>PPSR Registration ($)</label>
+                    <input type="number" id="ppsrReg" value="6" step="1">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="ppsrRegFinanced" checked>
+                    <label for="ppsrRegFinanced">Financed</label>
+                </div>
+            </div>
+            <div class="fee-row">
+                <div class="form-group">
+                    <label>PPSR Search ($)</label>
+                    <input type="number" id="ppsrSearch" value="0" step="1">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="ppsrSearchFinanced">
+                    <label for="ppsrSearchFinanced">Financed</label>
+                </div>
+            </div>
+            <div class="form-group" style="margin-top: 12px;">
+                <label>Monthly Account Fee ($)</label>
+                <input type="number" id="monthlyFee" value="0" step="1" style="max-width: 200px;">
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Results</div>
+            <div class="result-grid">
+                <div class="result-item">
+                    <div class="result-label">NAF (Net Amount Financed)</div>
+                    <div class="result-value" id="nafResult">$0.00</div>
+                </div>
+                <div class="result-item commission">
+                    <div class="result-label">Broker Commission</div>
+                    <div class="result-value" id="commissionResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Commission Rate</div>
+                    <div class="result-value small" id="commissionRateResult">0.00%</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Loading Factor</div>
+                    <div class="result-value small" id="loadingResult">0.000</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Amount Financed</div>
+                    <div class="result-value" id="amountFinancedResult">$0.00</div>
+                </div>
+                <div class="result-item highlight">
+                    <div class="result-label">Monthly Payment</div>
+                    <div class="result-value" id="paymentResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Gross Payment (incl fees)</div>
+                    <div class="result-value" id="grossPaymentResult">$0.00</div>
+                </div>
+                <div class="result-item rate">
+                    <div class="result-label">Comparison Rate</div>
+                    <div class="result-value" id="customerRateResult">0.00%</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Balloon Amount</div>
+                    <div class="result-value small" id="balloonResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Upfront Fees Due</div>
+                    <div class="result-value small" id="upfrontFeesResult">$0.00</div>
+                </div>
+            </div>
+
+            <div class="formula-box">
+                <h4>How This Calculator Works</h4>
+
+                <div class="formula-section">
+                    <h5>1. Pepper's Unique Loading Formula</h5>
+                    <div class="formula-line"><strong>NAF</strong> = Finance Amount + All Financed Fees</div>
+                    <div class="formula-line"><strong>Commission</strong> = Dollar amount entered (not added to principal)</div>
+                    <div class="formula-line"><strong>Loading</strong> = (NAF ÷ (NAF + Commission)) × (1 - 0.4 × Financier Rate)</div>
+                    <div class="formula-line"><strong>Amount Financed</strong> = NAF + (Loading × Commission)</div>
+                    <p class="formula-note">The 0.4 loading factor is unique to Pepper. Commission is NOT added directly to principal - it's serviced by the interest margin.</p>
+                </div>
+
+                <div class="formula-section">
+                    <h5>2. Monthly Payment Calculation</h5>
+                    <div class="formula-line"><strong>PMT (Arrears)</strong> = (Amount Financed - PV_balloon) × [r(1+r)^n] ÷ [(1+r)^n - 1]</div>
+                    <div class="formula-line"><strong>PMT (Advance)</strong> = PMT Arrears ÷ (1 + Monthly Rate)</div>
+                    <p class="formula-note">Payment is calculated on the "Amount Financed" at the financier rate.</p>
+                </div>
+
+                <div class="formula-section">
+                    <h5>3. Comparison Rate Calculation</h5>
+                    <div class="formula-line"><strong>Comparison Rate</strong> = The rate that, applied to NAF alone, produces the same payment</div>
+                    <div class="formula-line">We solve: PMT(NAF, comparison_rate, term, balloon) = Calculated Payment</div>
+                    <p class="formula-note">The comparison rate is the "true cost" from the customer's perspective.</p>
+                </div>
+
+                <div class="formula-section">
+                    <h5>4. Key Insight</h5>
+                    <div class="formula-line">Financier Rate: <span id="formulaFinancierRate">7.75%</span> → What lender charges on Amount Financed</div>
+                    <div class="formula-line">Comparison Rate: <span id="formulaCustomerRate">9.40%</span> → Effective rate customer experiences on NAF</div>
+                    <div class="formula-line">Loading Factor: <span id="formulaLoading">0.932</span> → Only <span id="loadingPercent">93.2%</span> of commission impacts payment</div>
+                    <p class="formula-note">The broker receives full commission, but it's serviced through the interest margin rather than being added to principal.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const LOADING_FACTOR = 0.4;
+
+        function formatCurrency(amount) {
+            return '$' + amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        }
+
+        // PMT calculation for arrears with balloon
+        function calculatePMTArrears(principal, annualRate, termMonths, balloon) {
+            const monthlyRate = annualRate / 12;
+            if (monthlyRate === 0) return (principal - balloon) / termMonths;
+
+            const pvBalloon = balloon / Math.pow(1 + monthlyRate, termMonths);
+            const adjustedPV = principal - pvBalloon;
+            return adjustedPV * (monthlyRate * Math.pow(1 + monthlyRate, termMonths)) / (Math.pow(1 + monthlyRate, termMonths) - 1);
+        }
+
+        // PMT for advance (first payment at settlement)
+        function calculatePMTAdvance(principal, annualRate, termMonths, balloon) {
+            const monthlyRate = annualRate / 12;
+            const pmtArrears = calculatePMTArrears(principal, annualRate, termMonths, balloon);
+            return pmtArrears / (1 + monthlyRate);
+        }
+
+        function calculatePMT(principal, annualRate, termMonths, balloon, isAdvance) {
+            return isAdvance
+                ? calculatePMTAdvance(principal, annualRate, termMonths, balloon)
+                : calculatePMTArrears(principal, annualRate, termMonths, balloon);
+        }
+
+        // Find rate that produces given PMT (binary search)
+        function findRateForPMT(targetPMT, principal, termMonths, balloon, isAdvance) {
+            let low = 0.01;
+            let high = 0.40;
+
+            for (let i = 0; i < 100; i++) {
+                const mid = (low + high) / 2;
+                const pmt = isAdvance
+                    ? calculatePMTAdvance(principal, mid, termMonths, balloon)
+                    : calculatePMTArrears(principal, mid, termMonths, balloon);
+                if (pmt < targetPMT) {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+            return (low + high) / 2;
+        }
+
+        function calculate() {
+            const financeAmount = parseFloat(document.getElementById('financeAmount').value) || 0;
+            const termMonths = parseInt(document.getElementById('termMonths').value) || 60;
+            const financierRateAnnual = parseFloat(document.getElementById('financierRate').value) / 100 || 0;
+            const commissionDollar = parseFloat(document.getElementById('commissionDollar').value) || 0;
+            const balloonPercent = parseFloat(document.getElementById('balloonPercent').value) / 100 || 0;
+            const paymentTiming = document.getElementById('paymentTiming').value;
+            const isAdvance = paymentTiming === 'advance';
+            const monthlyFee = parseFloat(document.getElementById('monthlyFee').value) || 0;
+
+            // Fees
+            const originationFee = parseFloat(document.getElementById('originationFee').value) || 0;
+            const establishmentFee = parseFloat(document.getElementById('establishmentFee').value) || 0;
+            const ppsrReg = parseFloat(document.getElementById('ppsrReg').value) || 0;
+            const ppsrSearch = parseFloat(document.getElementById('ppsrSearch').value) || 0;
+
+            const originationFinanced = document.getElementById('originationFinanced').checked;
+            const establishmentFinanced = document.getElementById('establishmentFinanced').checked;
+            const ppsrRegFinanced = document.getElementById('ppsrRegFinanced').checked;
+            const ppsrSearchFinanced = document.getElementById('ppsrSearchFinanced').checked;
+
+            // Calculate financed fees and upfront fees
+            let financedFees = 0;
+            let upfrontFees = 0;
+
+            if (originationFinanced) { financedFees += originationFee; } else { upfrontFees += originationFee; }
+            if (establishmentFinanced) { financedFees += establishmentFee; } else { upfrontFees += establishmentFee; }
+            if (ppsrRegFinanced) { financedFees += ppsrReg; } else { upfrontFees += ppsrReg; }
+            if (ppsrSearchFinanced) { financedFees += ppsrSearch; } else { upfrontFees += ppsrSearch; }
+
+            // NAF = finance amount + financed fees
+            const naf = financeAmount + financedFees;
+
+            // Commission is entered as dollar amount
+            const commission = commissionDollar;
+
+            // Calculate commission rate for display
+            const commissionRate = naf > 0 ? (commission / naf) : 0;
+
+            // Update commission percentage display under input
+            document.getElementById('commissionPercentDisplay').textContent =
+                `= ${(commissionRate * 100).toFixed(2)}% of NAF`;
+
+            // Pepper's loading formula
+            // Loading = (NAF / (NAF + Commission)) × (1 - 0.4 × FinancierRate)
+            const loading = (naf / (naf + commission)) * (1 - LOADING_FACTOR * financierRateAnnual);
+
+            // Amount Financed = NAF + Loading × Commission
+            const amountFinanced = naf + loading * commission;
+
+            // Balloon amount
+            const balloonDollars = financeAmount * balloonPercent;
+
+            // Calculate payment
+            const monthlyPayment = calculatePMT(amountFinanced, financierRateAnnual, termMonths, balloonDollars, isAdvance);
+            const grossPayment = monthlyPayment + monthlyFee;
+
+            // Find comparison rate (rate on NAF that produces this payment)
+            const comparisonRate = findRateForPMT(monthlyPayment, naf, termMonths, balloonDollars, isAdvance);
+
+            // Update display
+            document.getElementById('nafResult').textContent = formatCurrency(naf);
+            document.getElementById('commissionResult').textContent = formatCurrency(commission);
+            document.getElementById('commissionRateResult').textContent = (commissionRate * 100).toFixed(2) + '%';
+            document.getElementById('loadingResult').textContent = loading.toFixed(4);
+            document.getElementById('amountFinancedResult').textContent = formatCurrency(amountFinanced);
+            document.getElementById('paymentResult').textContent = formatCurrency(monthlyPayment);
+            document.getElementById('grossPaymentResult').textContent = formatCurrency(grossPayment);
+            document.getElementById('customerRateResult').textContent = (comparisonRate * 100).toFixed(2) + '%';
+            document.getElementById('balloonResult').textContent = formatCurrency(balloonDollars);
+            document.getElementById('upfrontFeesResult').textContent = formatCurrency(upfrontFees);
+
+            // Update formula box
+            document.getElementById('formulaFinancierRate').textContent = (financierRateAnnual * 100).toFixed(2) + '%';
+            document.getElementById('formulaCustomerRate').textContent = (comparisonRate * 100).toFixed(2) + '%';
+            document.getElementById('formulaLoading').textContent = loading.toFixed(4);
+            document.getElementById('loadingPercent').textContent = (loading * 100).toFixed(2) + '%';
+        }
+
+        // Add event listeners to all inputs
+        document.querySelectorAll('input, select').forEach(el => {
+            el.addEventListener('input', calculate);
+            el.addEventListener('change', calculate);
+        });
+
+        // Initial calculation
+        calculate();
+    </script>
+</body>
+</html>

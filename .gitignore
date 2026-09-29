@@ -1,0 +1,18 @@
+node_modules/
+.pnpm-store/
+dist/
+build/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+out/
+release/
+*.tsbuildinfo
+__pycache__/
+*.pyc
+# Public, non-secret build configuration (API origin only)
+!apps/desktop/.env.production
+# Generated local database role passwords for the one-command launcher.
+.local-stack.json

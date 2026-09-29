@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Interest Calculator - Autopay/MoneyMe</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        h1 { color: #5c6bc0; margin-bottom: 8px; font-size: 1.5rem; }
+        .subtitle { color: #666; margin-bottom: 20px; font-size: 0.9rem; }
+        .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card-title { font-weight: 600; color: #1a1a2e; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #5c6bc0; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-size: 0.85rem; color: #555; margin-bottom: 4px; font-weight: 500; }
+        .form-group input, .form-group select { padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #5c6bc0; }
+        .checkbox-group { flex-direction: row; align-items: center; gap: 8px; }
+        .checkbox-group input { width: auto; }
+        .checkbox-group label { margin: 0; font-size: 0.9rem; }
+        .fee-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; padding: 12px; background: #fafafa; border-radius: 8px; margin-bottom: 8px; }
+        .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+        .result-item { background: #f8f9fa; padding: 12px; border-radius: 8px; }
+        .result-item.highlight { background: #e8eaf6; border: 1px solid #5c6bc0; }
+        .result-item.commission { background: #e8f5e9; border: 1px solid #4caf50; }
+        .result-label { font-size: 0.75rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+        .result-value { font-size: 1.2rem; font-weight: 600; color: #1a1a2e; margin-top: 4px; }
+        .result-value.small { font-size: 1rem; }
+        .formula-box { background: #e8eaf6; padding: 16px; border-radius: 8px; margin-top: 16px; border-left: 4px solid #5c6bc0; }
+        .formula-box h4 { color: #5c6bc0; margin-bottom: 12px; }
+        .formula-section { margin-bottom: 16px; }
+        .formula-section h5 { color: #333; margin-bottom: 8px; font-size: 0.9rem; }
+        .formula-line { font-family: 'Monaco', 'Consolas', monospace; font-size: 0.85rem; margin: 4px 0; color: #444; padding-left: 12px; }
+        .formula-note { font-size: 0.85rem; color: #666; font-style: italic; margin-top: 8px; }
+        .schedule-table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 0.85rem; }
+        .schedule-table th, .schedule-table td { padding: 10px 8px; text-align: right; border-bottom: 1px solid #eee; }
+        .schedule-table th { background: #f5f5f5; font-weight: 600; color: #333; text-align: left; }
+        .schedule-table th:first-child { text-align: left; }
+        .schedule-table td:first-child { text-align: left; }
+        .schedule-table tr:hover { background: #f9f9f9; }
+        .schedule-container { max-height: 400px; overflow-y: auto; }
+        .note { background: #fff8e1; padding: 12px; border-radius: 8px; font-size: 0.85rem; color: #856404; margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Daily Interest Calculator</h1>
+        <p class="subtitle">Autopay/MoneyMe Model - Daily interest accrual with capitalised commission</p>
+
+        <div class="card">
+            <div class="card-title">Loan Details</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Finance Amount ($)</label>
+                    <input type="number" id="financeAmount" value="80000" step="100">
+                </div>
+                <div class="form-group">
+                    <label>Term (months)</label>
+                    <input type="number" id="termMonths" value="60" min="12" max="84">
+                </div>
+                <div class="form-group">
+                    <label>Annual Rate (%)</label>
+                    <input type="number" id="annualRate" value="8.95" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Commission Rate (%)</label>
+                    <input type="number" id="commissionRate" value="4.0" step="0.1" min="0" max="10">
+                </div>
+                <div class="form-group">
+                    <label>Settlement Date</label>
+                    <input type="date" id="settlementDate" value="2025-05-31">
+                </div>
+                <div class="form-group">
+                    <label>First Payment Date <span id="daysFromSettlement" style="font-weight: normal; color: #888;">(6 days)</span></label>
+                    <input type="date" id="firstRepaymentDate" value="2025-06-06">
+                </div>
+                <div class="form-group checkbox-group" style="align-self: end;">
+                    <input type="checkbox" id="adjustForHolidays" checked>
+                    <label for="adjustForHolidays">Adjust for weekends/holidays (NSW)</label>
+                </div>
+                <div class="form-group">
+                    <label>Balloon (%)</label>
+                    <input type="number" id="balloonPercent" value="0" step="5" min="0" max="50">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Fees</div>
+            <div class="fee-row">
+                <div class="form-group">
+                    <label>Establishment Fee ($)</label>
+                    <input type="number" id="establishmentFee" value="990" step="10">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="establishmentFinanced" checked>
+                    <label for="establishmentFinanced">Financed</label>
+                </div>
+            </div>
+            <div class="fee-row">
+                <div class="form-group">
+                    <label>Origination Fee ($)</label>
+                    <input type="number" id="originationFee" value="0" step="10">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="originationFinanced" checked>
+                    <label for="originationFinanced">Financed</label>
+                </div>
+            </div>
+            <div class="form-grid" style="margin-top: 12px;">
+                <div class="form-group">
+                    <label>Monthly Account Fee ($)</label>
+                    <input type="number" id="monthlyFee" value="12.50" step="0.50">
+                </div>
+                <div class="form-group">
+                    <label>Sliding Fee ($)</label>
+                    <input type="number" id="slidingFee" value="12.50" step="0.50">
+                </div>
+            </div>
+            <div class="note">
+                <strong>Note:</strong> Daily interest lenders typically provide a "starting principal" that already includes commission and fees.
+                This calculator shows how that principal is derived and how daily interest is calculated.
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Results</div>
+            <div class="result-grid">
+                <div class="result-item">
+                    <div class="result-label">NAF (Net Amount Financed)</div>
+                    <div class="result-value" id="nafResult">$0.00</div>
+                </div>
+                <div class="result-item commission">
+                    <div class="result-label">Broker Commission</div>
+                    <div class="result-value" id="commissionResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Starting Principal</div>
+                    <div class="result-value" id="principalResult">$0.00</div>
+                </div>
+                <div class="result-item highlight">
+                    <div class="result-label">Monthly Payment</div>
+                    <div class="result-value" id="paymentResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Gross Payment (incl fees)</div>
+                    <div class="result-value" id="grossPaymentResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Daily Rate</div>
+                    <div class="result-value small" id="dailyRateResult">0.000000%</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">First Payment Date</div>
+                    <div class="result-value small" id="firstPaymentDate">-</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">First Payment Interest</div>
+                    <div class="result-value small" id="firstInterestResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Balloon Amount</div>
+                    <div class="result-value small" id="balloonResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Upfront Fees Due</div>
+                    <div class="result-value small" id="upfrontFeesResult">$0.00</div>
+                </div>
+            </div>
+
+            <div class="formula-box">
+                <h4>How Daily Interest Works</h4>
+
+                <div class="formula-section">
+                    <h5>1. Starting Principal Calculation</h5>
+                    <div class="formula-line"><strong>NAF</strong> = Finance Amount + All Financed Fees</div>
+                    <div class="formula-line"><strong>Commission</strong> = NAF × Commission Rate</div>
+                    <div class="formula-line"><strong>Starting Principal</strong> = NAF + Commission (fully capitalised)</div>
+                    <p class="formula-note">Unlike monthly compounding, daily interest lenders typically provide a single "starting principal" figure that already includes everything.</p>
+                </div>
+
+                <div class="formula-section">
+                    <h5>2. Daily Interest Calculation</h5>
+                    <div class="formula-line"><strong>Daily Rate</strong> = Annual Rate ÷ 365</div>
+                    <div class="formula-line"><strong>Interest Per Period</strong> = Balance × Daily Rate × Actual Days</div>
+                    <div class="formula-line"><strong>First Payment</strong> = Settlement day counts as day 1 (+1 day interest)</div>
+                    <p class="formula-note">Interest varies each month based on actual calendar days. A 31-day month accrues more interest than a 28-day month.</p>
+                </div>
+
+                <div class="formula-section">
+                    <h5>3. Payment Date Adjustments</h5>
+                    <div class="formula-line">If payment falls on weekend → Move to next Monday</div>
+                    <div class="formula-line">If payment falls on NSW public holiday → Move to next business day</div>
+                    <div class="formula-line">Target payment day maintained month-to-month where possible</div>
+                    <p class="formula-note">This calculator uses NSW public holidays as Autopay/MoneyMe is Sydney-based. Toggle above to enable/disable this adjustment.</p>
+                    <p class="formula-note" style="margin-top: 8px;"><strong>NSW Public Holidays included (2025-2030):</strong> New Year's Day, Australia Day, Good Friday, Easter Saturday, Easter Monday, Anzac Day, Queen's Birthday (2nd Mon June), Bank Holiday (1st Mon Aug), Labour Day (1st Mon Oct), Christmas Day, Boxing Day. When holidays fall on weekends, substitute days are observed on the next available weekday.</p>
+                </div>
+
+                <div class="formula-section">
+                    <h5>4. Why Daily Interest Matters</h5>
+                    <div class="formula-line">Daily Rate: <span id="formulaDailyRate">0.0245%</span> per day</div>
+                    <div class="formula-line">30-day month interest: <span id="formula30Day">$0.00</span></div>
+                    <div class="formula-line">31-day month interest: <span id="formula31Day">$0.00</span></div>
+                    <p class="formula-note">The variable interest means amortization schedules from daily-interest lenders won't match monthly-compounding calculators exactly.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Amortization Schedule (First 12 Payments)</div>
+            <div class="schedule-container">
+                <table class="schedule-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Payment Date</th>
+                            <th>Days</th>
+                            <th>Opening Balance</th>
+                            <th>Interest</th>
+                            <th>Principal</th>
+                            <th>Closing Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scheduleBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // NSW Public Holidays 2025-2030
+        // New Year's Day, Australia Day, Good Friday, Easter Saturday, Easter Monday,
+        // Anzac Day, Queen's Birthday (2nd Mon June), Bank Holiday (1st Mon Aug),
+        // Labour Day (1st Mon Oct), Christmas Day, Boxing Day
+        const NSW_HOLIDAYS = [
+            // 2025
+            '2025-01-01', '2025-01-27', '2025-04-18', '2025-04-19', '2025-04-21',
+            '2025-04-25', '2025-06-09', '2025-08-04', '2025-10-06', '2025-12-25', '2025-12-26',
+            // 2026
+            '2026-01-01', '2026-01-26', '2026-04-03', '2026-04-04', '2026-04-06',
+            '2026-04-25', '2026-06-08', '2026-08-03', '2026-10-05', '2026-12-25', '2026-12-28',
+            // 2027
+            '2027-01-01', '2027-01-26', '2027-03-26', '2027-03-27', '2027-03-29',
+            '2027-04-26', '2027-06-14', '2027-08-02', '2027-10-04', '2027-12-27', '2027-12-28',
+            // 2028
+            '2028-01-03', '2028-01-26', '2028-04-14', '2028-04-15', '2028-04-17',
+            '2028-04-25', '2028-06-12', '2028-08-07', '2028-10-02', '2028-12-25', '2028-12-26',
+            // 2029
+            '2029-01-01', '2029-01-26', '2029-03-30', '2029-03-31', '2029-04-02',
+            '2029-04-25', '2029-06-11', '2029-08-06', '2029-10-01', '2029-12-25', '2029-12-26',
+            // 2030
+            '2030-01-01', '2030-01-28', '2030-04-19', '2030-04-20', '2030-04-22',
+            '2030-04-25', '2030-06-10', '2030-08-05', '2030-10-07', '2030-12-25', '2030-12-26'
+        ];
+
+        function formatCurrency(amount) {
+            return '$' + amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        }
+
+        function formatDate(date) {
+            return date.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+        }
+
+        function isWeekend(date) {
+            const day = date.getDay();
+            return day === 0 || day === 6;
+        }
+
+        function isHoliday(date) {
+            const dateStr = date.toISOString().split('T')[0];
+            return NSW_HOLIDAYS.includes(dateStr);
+        }
+
+        function getNextBusinessDay(date, adjustForHolidays = true) {
+            const result = new Date(date);
+            if (!adjustForHolidays) return result;
+            while (isWeekend(result) || isHoliday(result)) {
+                result.setDate(result.getDate() + 1);
+            }
+            return result;
+        }
+
+        function daysBetween(date1, date2) {
+            const oneDay = 24 * 60 * 60 * 1000;
+            return Math.round((date2 - date1) / oneDay);
+        }
+
+        // Calculate PMT using daily interest approximation
+        function calculateDailyPMT(principal, annualRate, termMonths, balloon) {
+            // For daily interest, we approximate using monthly compounding then adjust
+            const monthlyRate = annualRate / 12;
+            if (monthlyRate === 0) return (principal - balloon) / termMonths;
+
+            const pvBalloon = balloon / Math.pow(1 + monthlyRate, termMonths);
+            const adjustedPV = principal - pvBalloon;
+            return adjustedPV * (monthlyRate * Math.pow(1 + monthlyRate, termMonths)) / (Math.pow(1 + monthlyRate, termMonths) - 1);
+        }
+
+        function calculate() {
+            const financeAmount = parseFloat(document.getElementById('financeAmount').value) || 0;
+            const termMonths = parseInt(document.getElementById('termMonths').value) || 60;
+            const annualRate = parseFloat(document.getElementById('annualRate').value) / 100 || 0;
+            const commissionRatePercent = parseFloat(document.getElementById('commissionRate').value) / 100 || 0;
+            const balloonPercent = parseFloat(document.getElementById('balloonPercent').value) / 100 || 0;
+            const settlementDateStr = document.getElementById('settlementDate').value;
+            const monthlyFee = parseFloat(document.getElementById('monthlyFee').value) || 0;
+            const slidingFee = parseFloat(document.getElementById('slidingFee').value) || 0;
+
+            // Fees
+            const establishmentFee = parseFloat(document.getElementById('establishmentFee').value) || 0;
+            const originationFee = parseFloat(document.getElementById('originationFee').value) || 0;
+            const establishmentFinanced = document.getElementById('establishmentFinanced').checked;
+            const originationFinanced = document.getElementById('originationFinanced').checked;
+
+            let financedFees = 0;
+            let upfrontFees = 0;
+            if (establishmentFinanced) { financedFees += establishmentFee; } else { upfrontFees += establishmentFee; }
+            if (originationFinanced) { financedFees += originationFee; } else { upfrontFees += originationFee; }
+
+            // NAF and commission
+            const naf = financeAmount + financedFees;
+            const commission = naf * commissionRatePercent;
+            const startingPrincipal = naf + commission;
+            const balloonDollars = financeAmount * balloonPercent;
+
+            // Daily rate
+            const dailyRate = annualRate / 365;
+
+            // Calculate monthly payment
+            const monthlyPayment = calculateDailyPMT(startingPrincipal, annualRate, termMonths, balloonDollars);
+            const grossPayment = monthlyPayment + monthlyFee + slidingFee;
+
+            // Parse settlement date and first payment date from inputs
+            const settlementDate = new Date(settlementDateStr);
+            const firstPaymentDateStr = document.getElementById('firstRepaymentDate').value;
+            const firstPaymentDate = new Date(firstPaymentDateStr);
+
+            // Update days from settlement label
+            const daysFromSettlement = daysBetween(settlementDate, firstPaymentDate);
+            document.getElementById('daysFromSettlement').textContent = `(${daysFromSettlement} days)`;
+
+            // Days for first payment (settlement day counts as day 1, so +1)
+            const firstPaymentDays = daysBetween(settlementDate, firstPaymentDate) + 1;
+            const firstInterest = startingPrincipal * dailyRate * firstPaymentDays;
+
+            // Update display
+            document.getElementById('nafResult').textContent = formatCurrency(naf);
+            document.getElementById('commissionResult').textContent = formatCurrency(commission);
+            document.getElementById('principalResult').textContent = formatCurrency(startingPrincipal);
+            document.getElementById('paymentResult').textContent = formatCurrency(monthlyPayment);
+            document.getElementById('grossPaymentResult').textContent = formatCurrency(grossPayment);
+            document.getElementById('dailyRateResult').textContent = (dailyRate * 100).toFixed(6) + '%';
+            document.getElementById('firstPaymentDate').textContent = formatDate(firstPaymentDate);
+            document.getElementById('firstInterestResult').textContent = formatCurrency(firstInterest);
+            document.getElementById('balloonResult').textContent = formatCurrency(balloonDollars);
+            document.getElementById('upfrontFeesResult').textContent = formatCurrency(upfrontFees);
+
+            // Update formula box
+            document.getElementById('formulaDailyRate').textContent = (dailyRate * 100).toFixed(4) + '%';
+            document.getElementById('formula30Day').textContent = formatCurrency(startingPrincipal * dailyRate * 30);
+            document.getElementById('formula31Day').textContent = formatCurrency(startingPrincipal * dailyRate * 31);
+
+            // Generate amortization schedule
+            const adjustForHolidays = document.getElementById('adjustForHolidays').checked;
+            generateSchedule(startingPrincipal, dailyRate, monthlyPayment, settlementDate, firstPaymentDate, termMonths, balloonDollars, adjustForHolidays);
+        }
+
+        function generateSchedule(principal, dailyRate, payment, settlementDate, firstPaymentDate, termMonths, balloon, adjustForHolidays) {
+            const tbody = document.getElementById('scheduleBody');
+            tbody.innerHTML = '';
+
+            let balance = principal;
+            let prevDate = settlementDate;
+            let currentPaymentDate = new Date(firstPaymentDate);
+
+            const maxRows = Math.min(12, termMonths);
+
+            for (let i = 0; i < maxRows; i++) {
+                // Calculate days (first payment includes +1 for settlement day)
+                let days = daysBetween(prevDate, currentPaymentDate);
+                if (i === 0) days += 1; // Settlement day counts
+
+                const interest = balance * dailyRate * days;
+                let principalPaid = payment - interest;
+
+                // Last payment adjustment for balloon
+                if (i === termMonths - 1 && balloon > 0) {
+                    principalPaid = balance - balloon;
+                }
+
+                const closingBalance = Math.max(0, balance - principalPaid);
+
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${i + 1}</td>
+                    <td>${formatDate(currentPaymentDate)}</td>
+                    <td>${days}</td>
+                    <td>${formatCurrency(balance)}</td>
+                    <td>${formatCurrency(interest)}</td>
+                    <td>${formatCurrency(principalPaid)}</td>
+                    <td>${formatCurrency(closingBalance)}</td>
+                `;
+                tbody.appendChild(row);
+
+                balance = closingBalance;
+                prevDate = new Date(currentPaymentDate);
+
+                // Next payment date (target same day next month, adjust for business days)
+                currentPaymentDate.setMonth(currentPaymentDate.getMonth() + 1);
+                currentPaymentDate = getNextBusinessDay(currentPaymentDate, adjustForHolidays);
+            }
+        }
+
+        // Update first payment date when settlement date changes (+6 days default)
+        function updateFirstPaymentDate() {
+            const settlementDateStr = document.getElementById('settlementDate').value;
+            const adjustForHolidays = document.getElementById('adjustForHolidays').checked;
+            if (settlementDateStr) {
+                const settlementDate = new Date(settlementDateStr);
+                let firstPaymentDate = new Date(settlementDate);
+                firstPaymentDate.setDate(firstPaymentDate.getDate() + 6); // Default: 6 days after settlement
+                firstPaymentDate = getNextBusinessDay(firstPaymentDate, adjustForHolidays);
+                document.getElementById('firstRepaymentDate').value = firstPaymentDate.toISOString().split('T')[0];
+            }
+            calculate();
+        }
+
+        // Add event listeners
+        document.querySelectorAll('input, select').forEach(el => {
+            el.addEventListener('input', calculate);
+            el.addEventListener('change', calculate);
+        });
+
+        // Special handler for settlement date to auto-update first payment date
+        document.getElementById('settlementDate').addEventListener('change', updateFirstPaymentDate);
+
+        // When toggle changes, recalculate first payment date
+        document.getElementById('adjustForHolidays').addEventListener('change', updateFirstPaymentDate);
+
+        // Initial calculation
+        calculate();
+    </script>
+</body>
+</html>

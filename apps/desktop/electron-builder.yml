@@ -1,0 +1,25 @@
+appId: finance.swyft.desktop
+productName: Swyft Finance
+asar: true
+npmRebuild: false
+directories:
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/tests/**'
+  - '!**/*.test.{ts,tsx}'
+  - '!**/test-support/**'
+  - '!**/fixtures/**'
+  - '!**/*.html.ts'
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Swyft-Finance-${version}-${arch}-Setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

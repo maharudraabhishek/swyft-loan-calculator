@@ -1,0 +1,178 @@
+{
+  "_documentation": "Lender configurations for the quoting calculator. Each lender has a unique commission model.",
+
+  "lenders": [
+    {
+      "id": "westpac",
+      "name": "Westpac / Metro Finance",
+      "commission_model": "capitalised",
+      "description": "Commission is added to loan principal. Customer pays interest on commission.",
+      "interest_calculation": "monthly",
+      "payment_timing": "advance",
+      "fees": {
+        "establishment": {
+          "type": "fixed",
+          "amount": 495,
+          "financed": true
+        },
+        "ppsr": 6,
+        "monthly_account_fee": 0
+      },
+      "commission": {
+        "type": "percentage",
+        "base_on": "NAF",
+        "standard_rate": 0.04,
+        "max_rate": 0.06,
+        "calculation": "NAF × commission_rate, added to principal"
+      },
+      "formula": {
+        "NAF": "finance_amount + financed_fees",
+        "commission": "NAF × commission_rate",
+        "total_financed": "NAF + commission",
+        "PMT": "standard compound interest on total_financed at base_rate",
+        "comparison_rate": "rate on NAF that produces same PMT"
+      },
+      "notes": [
+        "Comparison rate is always higher than base rate due to capitalised commission",
+        "Supports both advance and arrears payment modes",
+        "Balloon payments reduce monthly PMT but increase comparison rate"
+      ]
+    },
+    {
+      "id": "branded",
+      "name": "Branded Financial Services",
+      "commission_model": "overs",
+      "description": "Broker earns MAX(base commission, 75% + GST of rate dial-up difference).",
+      "interest_calculation": "monthly",
+      "payment_timing": "arrears",
+      "fees": {
+        "establishment": {
+          "type": "conditional",
+          "dealer": 550,
+          "private": 650,
+          "financed": true
+        },
+        "ppsr": 6,
+        "monthly_account_fee": 8
+      },
+      "commission": {
+        "type": "overs",
+        "base_commission": 110,
+        "overs_percentage": 0.75,
+        "gst_rate": 0.10,
+        "calculation": "MAX(base_commission, 75% × hiring_difference × 1.10)"
+      },
+      "formula": {
+        "NAF": "finance_amount + establishment_fee + ppsr",
+        "base_PMT": "PMT(NAF, base_rate, term)",
+        "final_PMT": "PMT(NAF, contract_rate, term)",
+        "base_total_hiring": "base_PMT × term",
+        "final_total_hiring": "final_PMT × term",
+        "hiring_difference": "final_total_hiring - base_total_hiring",
+        "overs_with_gst": "hiring_difference × 0.75 × 1.10",
+        "commission": "MAX(110, overs_with_gst)"
+      },
+      "notes": [
+        "Contract rate must be >= base rate",
+        "No commission added to principal - customer rate = contract rate",
+        "Monthly fee of $8 is charged separately (not in PMT calculation)",
+        "Broker can target a specific commission and reverse-calculate required rate"
+      ]
+    },
+    {
+      "id": "pepper",
+      "name": "Pepper Money",
+      "commission_model": "discount_rate",
+      "description": "Uses a unique loading formula that partially capitalises commission.",
+      "interest_calculation": "monthly",
+      "payment_timing": "advance",
+      "fees": {
+        "origination": {
+          "type": "fixed",
+          "amount": 790,
+          "financed": true
+        },
+        "establishment": {
+          "type": "fixed",
+          "amount": 499,
+          "financed": false
+        },
+        "ppsr_registration": 6,
+        "ppsr_search": 2,
+        "monthly_account_fee": 0
+      },
+      "commission": {
+        "type": "loaded",
+        "base_on": "NAF",
+        "standard_rate": 0.02,
+        "max_rate": 0.04,
+        "loading_factor": 0.4,
+        "calculation": "NAF × commission_rate, with 0.4 loading factor applied"
+      },
+      "formula": {
+        "NAF": "finance_amount + all_financed_fees",
+        "commission": "NAF × commission_rate",
+        "loading": "(NAF / (NAF + commission)) × (1 - 0.4 × financier_rate)",
+        "amount_financed": "NAF + loading × commission",
+        "PMT": "PMT_advance(amount_financed, financier_rate, term, balloon)",
+        "customer_rate": "rate on NAF that produces this PMT"
+      },
+      "notes": [
+        "The 0.4 factor is unique to Pepper - reverse-engineered from their portal",
+        "Only ~93% of commission impacts the PMT at typical rates",
+        "Customer rate is between financier rate and what capitalised rate would be",
+        "Fees can be individually set as financed or upfront",
+        "Balloon payments are supported"
+      ]
+    },
+    {
+      "id": "autopay",
+      "name": "MoneyMe / Autopay",
+      "commission_model": "capitalised",
+      "description": "Daily interest calculation with monthly payments. Capitalised commission.",
+      "interest_calculation": "daily",
+      "payment_timing": "arrears_daily",
+      "fees": {
+        "establishment": {
+          "type": "varies",
+          "note": "Included in starting principal provided by lender"
+        },
+        "monthly_account_fee": 12.50,
+        "sliding_fee": 12.50
+      },
+      "commission": {
+        "type": "capitalised",
+        "note": "Commission already included in starting principal from lender"
+      },
+      "formula": {
+        "daily_rate": "annual_rate / 365",
+        "interest_per_period": "balance × daily_rate × days_in_period",
+        "first_payment_days": "calendar_days + 1 (settlement day counts)",
+        "subsequent_payment_days": "actual calendar days between payments",
+        "payment_date_adjustment": "if weekend or NSW public holiday, move to next business day"
+      },
+      "notes": [
+        "First payment has +1 day interest (settlement day counts)",
+        "Payment dates adjusted to next business day if falls on weekend/holiday",
+        "Uses NSW public holidays (lender is in Sydney)",
+        "Target payment day is maintained month-to-month where possible",
+        "Daily interest means each payment period has variable interest based on actual days"
+      ]
+    }
+  ],
+
+  "comparison": {
+    "capitalised_vs_overs": {
+      "capitalised": "Customer pays interest on commission → higher comparison rate",
+      "overs": "Customer doesn't pay interest on commission → commission from rate markup"
+    },
+    "daily_vs_monthly": {
+      "daily": "Interest = balance × (rate/365) × actual_days → varies each period",
+      "monthly": "Interest = balance × (rate/12) → fixed per period"
+    },
+    "advance_vs_arrears": {
+      "advance": "First payment at settlement, PMT = standard_PMT / (1 + monthly_rate)",
+      "arrears": "First payment after one period, PMT = standard compound interest formula"
+    }
+  }
+}

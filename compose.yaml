@@ -1,0 +1,64 @@
+# Local development only. Credentials here are throwaway values for loopback-bound
+# containers and are never used by any deployed environment.
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local-dev-only
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Disposable database for automated tests: tmpfs, recreated freely.
+  postgres-test:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local-test-only
+    ports:
+      - "127.0.0.1:55433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      NODE_ENV: development
+      PUBLIC_BASE_URL: http://127.0.0.1:8080
+      DB_HOST: postgres
+      DB_NAME: swyft
+      DB_USER: swyft_app
+      DB_PASSWORD: ${SWYFT_APP_DB_PASSWORD:-}
+      IDENTITY_PROVIDER: dev
+      LOGO_STORAGE: memory
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+volumes:
+  postgres-data:

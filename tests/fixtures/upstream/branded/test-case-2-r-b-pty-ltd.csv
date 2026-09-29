@@ -1,0 +1,30 @@
+# Branded Financial Services Test Case 2 - R-B Pty Ltd
+# ==============================================================
+# Asset Price: $104,865.09
+# Cash Deposit: $25,000.00
+# Finance Amount: $79,865.09
+# Lender/Establishment Fee: $550.00 (financed)
+# Origination Fee: $990.00 (financed)
+# PPSR Fee: $6.00 (financed)
+# NAF (Net Amount Financed): $81,411.09
+# Base Rate: 9.25% p.a.
+# Contract Rate: 9.95% p.a.
+# Commission: $1,380.43 (paid from overs - rate differential)
+# Payment Mode: ADVANCE (first payment at settlement)
+# Monthly Payment (Net): $1,713.53
+# Monthly Account Fee: $8.00
+# Gross Payment: $1,721.53
+# Term: 60 months
+# Balloon: 0%
+#
+# NOTE: First payment in ADVANCE mode is pure principal (no interest)
+#
+# COMMISSION MODEL: Overs
+# Commission = MAX($110, Hiring Difference x 75% x 1.10 GST)
+# Commissions are NOT added to principal - broker earns from rate markup
+#
+# AMORTIZATION: Developer must create their own schedule using:
+# - Contract Rate (9.95%) for interest calculations
+# - Monthly compounding
+# - Advance payment mode (first payment reduces principal before interest accrues)
+#

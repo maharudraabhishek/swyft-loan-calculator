@@ -1,0 +1,35 @@
+{
+  "name": "swyft-finance-stage-2",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,mjs,json,css,html}\" \"packages/**/*.{ts,tsx,js,mjs,json}\" package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs .prettierrc.json",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,js,mjs,json,css,html}\" \"packages/**/*.{ts,tsx,js,mjs,json}\" package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs .prettierrc.json",
+    "lint": "eslint apps packages",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r --no-bail run test",
+    "build": "pnpm -r run build",
+    "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1",
+    "api:dev": "pnpm --filter @swyft/api dev",
+    "api:start": "pnpm --filter @swyft/api start",
+    "desktop:dev": "pnpm --filter @swyft/desktop dev",
+    "desktop:package:win": "pnpm --filter @swyft/desktop package:win",
+    "test:db": "docker compose up -d --wait postgres-test && pnpm --filter @swyft/api test:db",
+    "db:up": "docker compose up -d --wait postgres",
+    "test:integration": "docker compose up -d --wait postgres-test && pnpm --filter @swyft/desktop test:integration"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.0",
+    "eslint": "10.11.0",
+    "prettier": "3.9.9",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.1",
+    "vitest": "5.0.2"
+  }
+}

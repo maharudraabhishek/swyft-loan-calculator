@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Branded Financial Services Calculator - Commission Overs</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 950px; margin: 0 auto; }
+        h1 { color: #2e7d32; margin-bottom: 8px; font-size: 1.5rem; }
+        .subtitle { color: #666; margin-bottom: 20px; font-size: 0.9rem; }
+        .card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card-title { font-weight: 600; color: #1a1a2e; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #2e7d32; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { font-size: 0.85rem; color: #555; margin-bottom: 4px; font-weight: 500; }
+        .form-group input, .form-group select { padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #2e7d32; }
+        .checkbox-group { flex-direction: row; align-items: center; gap: 8px; }
+        .checkbox-group input { width: auto; }
+        .checkbox-group label { margin: 0; font-size: 0.9rem; }
+        .fee-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; padding: 12px; background: #fafafa; border-radius: 8px; margin-bottom: 8px; }
+        .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+        .result-item { background: #f8f9fa; padding: 12px; border-radius: 8px; }
+        .result-item.highlight { background: #e8f5e9; border: 1px solid #2e7d32; }
+        .result-item.commission { background: #fff3e0; border: 1px solid #ff9800; }
+        .result-label { font-size: 0.75rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+        .result-value { font-size: 1.2rem; font-weight: 600; color: #1a1a2e; margin-top: 4px; }
+        .result-value.small { font-size: 1rem; }
+        .formula-box { background: #e8f5e9; padding: 16px; border-radius: 8px; margin-top: 16px; border-left: 4px solid #2e7d32; }
+        .formula-box h4 { color: #2e7d32; margin-bottom: 12px; }
+        .formula-section { margin-bottom: 16px; }
+        .formula-section h5 { color: #333; margin-bottom: 8px; font-size: 0.9rem; }
+        .formula-line { font-family: 'Monaco', 'Consolas', monospace; font-size: 0.85rem; margin: 4px 0; color: #444; padding-left: 12px; }
+        .formula-note { font-size: 0.85rem; color: #666; font-style: italic; margin-top: 8px; }
+        .note { background: #fff8e1; padding: 12px; border-radius: 8px; font-size: 0.85rem; color: #856404; margin-top: 16px; }
+        .error { color: #d32f2f; font-size: 0.85rem; margin-top: 8px; }
+        .reverse-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee; }
+        .btn { background: #2e7d32; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
+        .btn:hover { background: #1b5e20; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Branded Financial Services Calculator</h1>
+        <p class="subtitle">Commission Overs Model - Broker earns MAX(base commission, 75% + GST of rate differential)</p>
+
+        <div class="card">
+            <div class="card-title">Loan Details</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Finance Amount ($)</label>
+                    <input type="number" id="financeAmount" value="30000" step="100">
+                </div>
+                <div class="form-group">
+                    <label>Term (months)</label>
+                    <input type="number" id="termMonths" value="60" min="12" max="84">
+                </div>
+                <div class="form-group">
+                    <label>Base Rate (% annual)</label>
+                    <input type="number" id="baseRate" value="6.69" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Contract Rate (% annual)</label>
+                    <input type="number" id="contractRate" value="8.00" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Payment Timing</label>
+                    <select id="paymentTiming">
+                        <option value="arrears">Arrears (first payment after 1 month)</option>
+                        <option value="advance">Advance (first payment at settlement)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Balloon (%)</label>
+                    <input type="number" id="balloonPercent" value="0" step="5" min="0" max="50">
+                </div>
+            </div>
+            <div id="rateError" class="error" style="display: none;"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Fees</div>
+            <div class="fee-row">
+                <div class="form-group">
+                    <label>Establishment Fee ($)</label>
+                    <input type="number" id="establishmentFee" value="550" step="10">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="establishmentFinanced" checked>
+                    <label for="establishmentFinanced">Financed</label>
+                </div>
+            </div>
+            <div class="fee-row">
+                <div class="form-group">
+                    <label>Origination Fee ($)</label>
+                    <input type="number" id="originationFee" value="0" step="10">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="originationFinanced" checked>
+                    <label for="originationFinanced">Financed</label>
+                </div>
+            </div>
+            <div class="fee-row">
+                <div class="form-group">
+                    <label>PPSR Fee ($)</label>
+                    <input type="number" id="ppsrFee" value="6" step="1">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="ppsrFinanced" checked>
+                    <label for="ppsrFinanced">Financed</label>
+                </div>
+            </div>
+            <div class="form-group" style="margin-top: 12px;">
+                <label>Monthly Account Fee ($)</label>
+                <input type="number" id="monthlyFee" value="8" step="1" style="max-width: 200px;">
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Results</div>
+            <div class="result-grid">
+                <div class="result-item">
+                    <div class="result-label">NAF (Net Amount Financed)</div>
+                    <div class="result-value" id="nafResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Base Net Payment</div>
+                    <div class="result-value small" id="basePaymentResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Final Net Payment</div>
+                    <div class="result-value" id="finalPaymentResult">$0.00</div>
+                </div>
+                <div class="result-item highlight">
+                    <div class="result-label">Gross Payment (incl fee)</div>
+                    <div class="result-value" id="grossPaymentResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Base Total Hiring</div>
+                    <div class="result-value small" id="baseTotalResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Final Total Hiring</div>
+                    <div class="result-value small" id="finalTotalResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Hiring Difference</div>
+                    <div class="result-value small" id="hiringDiffResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Overs (75% + GST)</div>
+                    <div class="result-value small" id="oversGstResult">$0.00</div>
+                </div>
+                <div class="result-item commission">
+                    <div class="result-label">Broker Commission</div>
+                    <div class="result-value" id="commissionResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Balloon Amount</div>
+                    <div class="result-value small" id="balloonResult">$0.00</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Upfront Fees Due</div>
+                    <div class="result-value small" id="upfrontFeesResult">$0.00</div>
+                </div>
+            </div>
+            <div class="note" id="commissionNote"></div>
+
+            <div class="formula-box">
+                <h4>How This Calculator Works</h4>
+
+                <div class="formula-section">
+                    <h5>1. Monthly Payment Calculation</h5>
+                    <div class="formula-line"><strong>NAF</strong> = Finance Amount + All Financed Fees</div>
+                    <div class="formula-line"><strong>Base PMT</strong> = PMT(NAF, Base Rate, Term, Balloon) → What lender charges</div>
+                    <div class="formula-line"><strong>Final PMT</strong> = PMT(NAF, Contract Rate, Term, Balloon) → What customer pays</div>
+                    <div class="formula-line"><strong>PMT (Arrears)</strong> = (NAF - PV_balloon) × [r(1+r)^n] ÷ [(1+r)^n - 1]</div>
+                    <div class="formula-line"><strong>PMT (Advance)</strong> = PMT Arrears ÷ (1 + Monthly Rate)</div>
+                    <p class="formula-note">Unlike capitalised brokerage, the customer's rate IS the contract rate - no commission is added to the principal.</p>
+                </div>
+
+                <div class="formula-section">
+                    <h5>2. Commission (Overs) Calculation</h5>
+                    <div class="formula-line"><strong>Base Total Hiring</strong> = Base PMT × Term</div>
+                    <div class="formula-line"><strong>Final Total Hiring</strong> = Final PMT × Term</div>
+                    <div class="formula-line"><strong>Hiring Difference</strong> = Final Total Hiring - Base Total Hiring</div>
+                    <div class="formula-line"><strong>Overs Amount</strong> = Hiring Difference × 75% × 1.10 (GST)</div>
+                    <div class="formula-line"><strong>Commission</strong> = MAX($110 base, Overs Amount)</div>
+                    <p class="formula-note">Broker earns whichever is greater: the flat $110 base commission OR 75% + GST of the hiring difference. Not both - just the higher amount.</p>
+                </div>
+
+                <div class="formula-section">
+                    <h5>3. Why This Model Works Differently</h5>
+                    <div class="formula-line">Contract Rate: <span id="formulaContractRate">8.00%</span> → Customer sees this rate (no hidden commission)</div>
+                    <div class="formula-line">Base Rate: <span id="formulaBaseRate">6.69%</span> → What lender actually charges</div>
+                    <div class="formula-line">Rate Markup: <span id="formulaMarkup">1.31%</span> → Broker's earning opportunity</div>
+                    <p class="formula-note">The broker "dials up" the rate above base to earn commission. Higher markup = higher commission, but also higher customer payment.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Target Commission Calculator</div>
+            <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px;">Enter your desired commission to find the required contract rate.</p>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Target Commission ($)</label>
+                    <input type="number" id="targetCommission" value="1000" step="10">
+                </div>
+                <div class="form-group">
+                    <label>Required Contract Rate</label>
+                    <div class="result-value" id="requiredRateResult" style="padding-top: 8px;">-</div>
+                </div>
+            </div>
+            <button class="btn" onclick="calculateRequiredRate()" style="margin-top: 12px;">Calculate Required Rate</button>
+            <div id="targetNote" class="note" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const BASE_COMMISSION = 110;
+        const OVERS_PERCENTAGE = 0.75;
+        const GST_RATE = 0.10;
+
+        function formatCurrency(amount) {
+            return '$' + amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        }
+
+        // PMT calculation for arrears with balloon
+        function calculatePMTArrears(principal, annualRate, termMonths, balloon) {
+            const monthlyRate = annualRate / 12;
+            if (monthlyRate === 0) return (principal - balloon) / termMonths;
+
+            const pvBalloon = balloon / Math.pow(1 + monthlyRate, termMonths);
+            const adjustedPV = principal - pvBalloon;
+            return adjustedPV * (monthlyRate * Math.pow(1 + monthlyRate, termMonths)) / (Math.pow(1 + monthlyRate, termMonths) - 1);
+        }
+
+        // PMT for advance
+        function calculatePMTAdvance(principal, annualRate, termMonths, balloon) {
+            const monthlyRate = annualRate / 12;
+            const pmtArrears = calculatePMTArrears(principal, annualRate, termMonths, balloon);
+            return pmtArrears / (1 + monthlyRate);
+        }
+
+        function calculatePMT(principal, annualRate, termMonths, balloon, isAdvance) {
+            return isAdvance
+                ? calculatePMTAdvance(principal, annualRate, termMonths, balloon)
+                : calculatePMTArrears(principal, annualRate, termMonths, balloon);
+        }
+
+        function calculate() {
+            const financeAmount = parseFloat(document.getElementById('financeAmount').value) || 0;
+            const termMonths = parseInt(document.getElementById('termMonths').value) || 60;
+            const baseRateAnnual = parseFloat(document.getElementById('baseRate').value) / 100 || 0;
+            let contractRateAnnual = parseFloat(document.getElementById('contractRate').value) / 100 || 0;
+            const balloonPercent = parseFloat(document.getElementById('balloonPercent').value) / 100 || 0;
+            const paymentTiming = document.getElementById('paymentTiming').value;
+            const isAdvance = paymentTiming === 'advance';
+            const monthlyFee = parseFloat(document.getElementById('monthlyFee').value) || 0;
+
+            // Fees
+            const establishmentFee = parseFloat(document.getElementById('establishmentFee').value) || 0;
+            const originationFee = parseFloat(document.getElementById('originationFee').value) || 0;
+            const ppsrFee = parseFloat(document.getElementById('ppsrFee').value) || 0;
+
+            const establishmentFinanced = document.getElementById('establishmentFinanced').checked;
+            const originationFinanced = document.getElementById('originationFinanced').checked;
+            const ppsrFinanced = document.getElementById('ppsrFinanced').checked;
+
+            const errorDiv = document.getElementById('rateError');
+
+            // Validate contract rate >= base rate
+            if (contractRateAnnual < baseRateAnnual) {
+                contractRateAnnual = baseRateAnnual;
+                document.getElementById('contractRate').value = (baseRateAnnual * 100).toFixed(2);
+                errorDiv.textContent = 'Contract rate cannot be lower than base rate. Auto-corrected.';
+                errorDiv.style.display = 'block';
+            } else {
+                errorDiv.style.display = 'none';
+            }
+
+            // Calculate financed vs upfront fees
+            let financedFees = 0;
+            let upfrontFees = 0;
+
+            if (establishmentFinanced) { financedFees += establishmentFee; } else { upfrontFees += establishmentFee; }
+            if (originationFinanced) { financedFees += originationFee; } else { upfrontFees += originationFee; }
+            if (ppsrFinanced) { financedFees += ppsrFee; } else { upfrontFees += ppsrFee; }
+
+            // NAF = finance amount + financed fees
+            const naf = financeAmount + financedFees;
+            const balloonDollars = financeAmount * balloonPercent;
+
+            // Calculate payments at base rate and contract rate
+            const baseNetPayment = calculatePMT(naf, baseRateAnnual, termMonths, balloonDollars, isAdvance);
+            const finalNetPayment = calculatePMT(naf, contractRateAnnual, termMonths, balloonDollars, isAdvance);
+            const grossPayment = finalNetPayment + monthlyFee;
+
+            // Calculate total hiring amounts
+            const baseTotalHiring = baseNetPayment * termMonths;
+            const finalTotalHiring = finalNetPayment * termMonths;
+            const hiringDifference = finalTotalHiring - baseTotalHiring;
+
+            // Calculate overs commission
+            const oversWithGst = hiringDifference * OVERS_PERCENTAGE * (1 + GST_RATE);
+
+            // Commission is MAX of base OR overs (not both)
+            const commission = Math.max(BASE_COMMISSION, oversWithGst);
+
+            // Update display
+            document.getElementById('nafResult').textContent = formatCurrency(naf);
+            document.getElementById('basePaymentResult').textContent = formatCurrency(baseNetPayment);
+            document.getElementById('finalPaymentResult').textContent = formatCurrency(finalNetPayment);
+            document.getElementById('grossPaymentResult').textContent = formatCurrency(grossPayment);
+            document.getElementById('baseTotalResult').textContent = formatCurrency(baseTotalHiring);
+            document.getElementById('finalTotalResult').textContent = formatCurrency(finalTotalHiring);
+            document.getElementById('hiringDiffResult').textContent = formatCurrency(hiringDifference);
+            document.getElementById('oversGstResult').textContent = formatCurrency(oversWithGst);
+            document.getElementById('commissionResult').textContent = formatCurrency(commission);
+            document.getElementById('balloonResult').textContent = formatCurrency(balloonDollars);
+            document.getElementById('upfrontFeesResult').textContent = formatCurrency(upfrontFees);
+
+            // Update formula box
+            document.getElementById('formulaContractRate').textContent = (contractRateAnnual * 100).toFixed(2) + '%';
+            document.getElementById('formulaBaseRate').textContent = (baseRateAnnual * 100).toFixed(2) + '%';
+            document.getElementById('formulaMarkup').textContent = ((contractRateAnnual - baseRateAnnual) * 100).toFixed(2) + '%';
+
+            // Update commission note
+            const noteDiv = document.getElementById('commissionNote');
+            if (oversWithGst > BASE_COMMISSION) {
+                noteDiv.innerHTML = `<strong>Overs commission applies:</strong> ${formatCurrency(oversWithGst)} exceeds base commission of $${BASE_COMMISSION}. Broker takes the overs amount.`;
+            } else {
+                noteDiv.innerHTML = `<strong>Base commission applies:</strong> Overs of ${formatCurrency(oversWithGst)} is less than base commission of $${BASE_COMMISSION}. Broker receives $${BASE_COMMISSION} base.`;
+            }
+        }
+
+        function calculateRequiredRate() {
+            const targetCommission = parseFloat(document.getElementById('targetCommission').value) || 0;
+            const financeAmount = parseFloat(document.getElementById('financeAmount').value) || 0;
+            const termMonths = parseInt(document.getElementById('termMonths').value) || 60;
+            const baseRateAnnual = parseFloat(document.getElementById('baseRate').value) / 100 || 0;
+            const balloonPercent = parseFloat(document.getElementById('balloonPercent').value) / 100 || 0;
+            const paymentTiming = document.getElementById('paymentTiming').value;
+            const isAdvance = paymentTiming === 'advance';
+
+            // Fees
+            const establishmentFee = parseFloat(document.getElementById('establishmentFee').value) || 0;
+            const originationFee = parseFloat(document.getElementById('originationFee').value) || 0;
+            const ppsrFee = parseFloat(document.getElementById('ppsrFee').value) || 0;
+            const establishmentFinanced = document.getElementById('establishmentFinanced').checked;
+            const originationFinanced = document.getElementById('originationFinanced').checked;
+            const ppsrFinanced = document.getElementById('ppsrFinanced').checked;
+
+            let financedFees = 0;
+            if (establishmentFinanced) financedFees += establishmentFee;
+            if (originationFinanced) financedFees += originationFee;
+            if (ppsrFinanced) financedFees += ppsrFee;
+
+            const naf = financeAmount + financedFees;
+            const balloonDollars = financeAmount * balloonPercent;
+            const baseTotalHiring = calculatePMT(naf, baseRateAnnual, termMonths, balloonDollars, isAdvance) * termMonths;
+            const targetNote = document.getElementById('targetNote');
+
+            if (targetCommission <= BASE_COMMISSION) {
+                document.getElementById('requiredRateResult').textContent = (baseRateAnnual * 100).toFixed(2) + '%';
+                targetNote.innerHTML = `<strong>Note:</strong> Target commission of ${formatCurrency(targetCommission)} is at or below base commission ($${BASE_COMMISSION}). Any rate at or above ${(baseRateAnnual * 100).toFixed(2)}% will earn $${BASE_COMMISSION}.`;
+                targetNote.style.display = 'block';
+                return;
+            }
+
+            // Work backwards: commission = hiringDiff * 0.75 * 1.10
+            const requiredHiringDiff = targetCommission / (OVERS_PERCENTAGE * (1 + GST_RATE));
+            const requiredFinalTotal = baseTotalHiring + requiredHiringDiff;
+            const requiredMonthlyPayment = requiredFinalTotal / termMonths;
+
+            // Find rate that produces this payment using binary search
+            let low = baseRateAnnual;
+            let high = 0.30;
+            let requiredRate = baseRateAnnual;
+
+            for (let i = 0; i < 100; i++) {
+                const mid = (low + high) / 2;
+                const pmt = calculatePMT(naf, mid, termMonths, balloonDollars, isAdvance);
+                if (pmt < requiredMonthlyPayment) {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+                requiredRate = mid;
+            }
+
+            document.getElementById('requiredRateResult').textContent = (requiredRate * 100).toFixed(2) + '%';
+            targetNote.innerHTML = `<strong>Verification:</strong> At ${(requiredRate * 100).toFixed(2)}% contract rate, hiring difference is ${formatCurrency(requiredHiringDiff)}, producing commission of ${formatCurrency(targetCommission)}.`;
+            targetNote.style.display = 'block';
+        }
+
+        // Add event listeners
+        document.querySelectorAll('input, select').forEach(el => {
+            el.addEventListener('input', calculate);
+            el.addEventListener('change', calculate);
+        });
+
+        // Initial calculation
+        calculate();
+    </script>
+</body>
+</html>

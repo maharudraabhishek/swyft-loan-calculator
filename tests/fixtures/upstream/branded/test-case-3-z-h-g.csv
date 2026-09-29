@@ -1,0 +1,30 @@
+# Branded Financial Services Test Case 3 - Z-H-G
+# ==============================================================
+# Asset Price: $35,000.00
+# Cash Deposit: $3,500.00
+# Finance Amount: $31,500.00
+# Lender/Establishment Fee: $650.00 (financed)
+# Origination Fee: $990.00 (financed)
+# PPSR Fee: $6.00 (financed)
+# NAF (Net Amount Financed): $33,146.00
+# Base Rate: 11.90% p.a.
+# Contract Rate: 13.40% p.a.
+# Commission: $1,254.20 (paid from overs - rate differential)
+# Payment Mode: ADVANCE (first payment at settlement)
+# Monthly Payment (Net): $752.57
+# Monthly Account Fee: $8.00
+# Gross Payment: $760.57
+# Term: 60 months
+# Balloon: 0%
+#
+# NOTE: First payment in ADVANCE mode is pure principal (no interest)
+#
+# COMMISSION MODEL: Overs
+# Commission = MAX($110, Hiring Difference x 75% x 1.10 GST)
+# Commissions are NOT added to principal - broker earns from rate markup
+#
+# AMORTIZATION: Developer must create their own schedule using:
+# - Contract Rate (13.40%) for interest calculations
+# - Monthly compounding
+# - Advance payment mode (first payment reduces principal before interest accrues)
+#

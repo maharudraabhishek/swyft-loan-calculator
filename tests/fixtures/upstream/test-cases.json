@@ -1,0 +1,243 @@
+{
+  "_documentation": "Validation test cases. Calculator output must match expected values to the cent.",
+  "_instructions": "Run your calculator with these inputs. If outputs don't match, your formula is incorrect.",
+
+  "test_cases": [
+    {
+      "id": "westpac-basic",
+      "lender": "westpac",
+      "description": "Basic Westpac loan - capitalised commission, advance, no balloon",
+      "inputs": {
+        "finance_amount": 30000,
+        "term_months": 60,
+        "base_rate_annual": 0.085,
+        "commission_percent": 0.04,
+        "establishment_fee": 495,
+        "fee_financed": true,
+        "payment_mode": "advance",
+        "balloon": 0
+      },
+      "expected": {
+        "NAF": 30495.00,
+        "commission": 1219.80,
+        "total_financed": 31714.80,
+        "monthly_payment": 656.19,
+        "comparison_rate": 0.0923,
+        "total_interest": 7656.60
+      },
+      "notes": "Classic capitalised brokerage model"
+    },
+    {
+      "id": "branded-no-dialup",
+      "lender": "branded",
+      "description": "Branded loan at base rate - broker earns base commission only",
+      "inputs": {
+        "finance_amount": 30000,
+        "term_months": 60,
+        "base_rate_annual": 0.0669,
+        "contract_rate_annual": 0.0669,
+        "sale_type": "dealer",
+        "establishment_fee": 550,
+        "ppsr_fee": 6,
+        "monthly_fee": 8
+      },
+      "expected": {
+        "NAF": 30556.00,
+        "net_payment": 600.59,
+        "gross_payment": 608.59,
+        "total_hiring": 36035.40,
+        "hiring_difference": 0,
+        "overs_commission": 0,
+        "total_commission": 110.00
+      },
+      "notes": "No rate dial-up means broker just earns $110 base commission"
+    },
+    {
+      "id": "branded-with-dialup",
+      "lender": "branded",
+      "description": "Branded loan with rate dial-up - broker earns overs commission",
+      "inputs": {
+        "finance_amount": 30000,
+        "term_months": 60,
+        "base_rate_annual": 0.0669,
+        "contract_rate_annual": 0.08,
+        "sale_type": "dealer",
+        "establishment_fee": 550,
+        "ppsr_fee": 6,
+        "monthly_fee": 8
+      },
+      "expected": {
+        "NAF": 30556.00,
+        "base_net_payment": 600.59,
+        "final_net_payment": 619.57,
+        "gross_payment": 627.57,
+        "base_total_hiring": 36035.40,
+        "final_total_hiring": 37174.20,
+        "hiring_difference": 1138.80,
+        "overs_75_percent": 854.10,
+        "overs_with_gst": 939.51,
+        "total_commission": 939.51
+      },
+      "notes": "Overs ($939.51) exceeds base ($110) so broker takes overs"
+    },
+    {
+      "id": "pepper-origination-financed",
+      "lender": "pepper",
+      "description": "Pepper with origination fee financed, no balloon",
+      "inputs": {
+        "finance_amount": 34400,
+        "term_months": 60,
+        "financier_rate_annual": 0.1229,
+        "commission_percent": 0.02,
+        "origination_fee": 790,
+        "origination_financed": true,
+        "establishment_fee": 499,
+        "establishment_financed": false,
+        "payment_mode": "advance",
+        "balloon": 0
+      },
+      "expected": {
+        "NAF": 35190.00,
+        "commission": 703.80,
+        "loading_factor": 0.932,
+        "amount_financed": 35845.85,
+        "monthly_payment": 794.50,
+        "customer_rate": 0.1314,
+        "upfront_fees": 507.00
+      },
+      "notes": "Pepper's 0.4 loading factor formula verified against their portal"
+    },
+    {
+      "id": "pepper-all-fees-financed",
+      "lender": "pepper",
+      "description": "Pepper with all fees financed, no balloon",
+      "inputs": {
+        "finance_amount": 34400,
+        "term_months": 60,
+        "financier_rate_annual": 0.1229,
+        "commission_percent": 0.02,
+        "origination_fee": 790,
+        "origination_financed": true,
+        "establishment_fee": 499,
+        "establishment_financed": true,
+        "ppsr_reg_fee": 6,
+        "ppsr_reg_financed": true,
+        "ppsr_search_fee": 2,
+        "ppsr_search_financed": true,
+        "payment_mode": "advance",
+        "balloon": 0
+      },
+      "expected": {
+        "NAF": 35697.00,
+        "commission": 713.94,
+        "amount_financed": 36352.85,
+        "monthly_payment": 805.73,
+        "customer_rate": 0.1313
+      },
+      "notes": "More financed fees = higher NAF = slightly different commission %"
+    },
+    {
+      "id": "pepper-with-balloon",
+      "lender": "pepper",
+      "description": "Pepper with 30% balloon payment",
+      "inputs": {
+        "finance_amount": 34400,
+        "term_months": 60,
+        "financier_rate_annual": 0.1229,
+        "commission_percent": 0.02,
+        "origination_fee": 790,
+        "origination_financed": true,
+        "payment_mode": "advance",
+        "balloon_percent": 0.30,
+        "balloon_dollars": 10320
+      },
+      "expected": {
+        "NAF": 35190.00,
+        "monthly_payment": 670.38,
+        "customer_rate": 0.13
+      },
+      "notes": "Balloon reduces monthly payment significantly"
+    },
+    {
+      "id": "autopay-daily-interest",
+      "lender": "autopay",
+      "description": "MoneyMe/Autopay daily interest calculation",
+      "inputs": {
+        "starting_principal": 85704.86,
+        "term_months": 60,
+        "annual_rate": 0.0895,
+        "settlement_date": "2025-05-31",
+        "first_repayment_date": "2025-06-06",
+        "monthly_fee": 12.50,
+        "sliding_fee": 12.50,
+        "skip_weekends_holidays": true
+      },
+      "expected": {
+        "monthly_payment": 1767.42,
+        "first_payment_interest": 147.01,
+        "first_payment_days": 7,
+        "second_payment_date": "2025-07-07",
+        "second_payment_days": 31,
+        "second_payment_interest": 495.29
+      },
+      "notes": [
+        "First payment has +1 day interest (settlement day counts)",
+        "Jul 6 is Sunday, so payment moves to Jul 7 (Monday)",
+        "Interest varies each month based on actual calendar days"
+      ]
+    },
+    {
+      "id": "westpac-with-balloon",
+      "lender": "westpac",
+      "description": "Westpac with 30% balloon",
+      "inputs": {
+        "finance_amount": 45000,
+        "term_months": 48,
+        "base_rate_annual": 0.0795,
+        "commission_percent": 0.04,
+        "establishment_fee": 495,
+        "fee_financed": true,
+        "payment_mode": "arrears",
+        "balloon_percent": 0.30,
+        "balloon_dollars": 13500
+      },
+      "expected": {
+        "NAF": 45495.00,
+        "commission": 1819.80,
+        "total_financed": 47314.80,
+        "monthly_payment": 844.22,
+        "comparison_rate": 0.0878
+      },
+      "notes": "Balloon payment due at end of term, reduces monthly payments"
+    }
+  ],
+
+  "validation_rules": {
+    "payment_tolerance": 0.01,
+    "rate_tolerance": 0.001,
+    "commission_tolerance": 0.01
+  },
+
+  "common_errors": [
+    {
+      "error": "Payment off by a few cents",
+      "likely_cause": "Rounding intermediate calculations - maintain full precision until final result"
+    },
+    {
+      "error": "Comparison rate way off",
+      "likely_cause": "Using wrong principal for rate calculation - should be NAF not total financed"
+    },
+    {
+      "error": "Pepper numbers don't match",
+      "likely_cause": "Missing the 0.4 loading factor - Pepper uses unique formula"
+    },
+    {
+      "error": "Daily interest totals wrong",
+      "likely_cause": "Missing +1 day on first payment, or not adjusting for business days"
+    },
+    {
+      "error": "Branded commission wrong",
+      "likely_cause": "Forgot MAX() logic - commission is greater of base OR overs, not both"
+    }
+  ]
+}
