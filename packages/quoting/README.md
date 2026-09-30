@@ -1,6 +1,6 @@
 # Quoting (`@swyft/quoting`)
 
-The bridge between a lender's settings and the finance engine. It takes a **fee signature** (a lender product: fees, commission model, timing, caps) and the **broker's choices** (amount, term, rates, balloon, which fees to finance), and produces the exact engine input. Both the desktop preview and the API's recalculation use it, so they can never disagree.
+Sits between a lender's settings and the finance engine. It takes a **fee signature** (a lender product: fees, commission model, timing, caps) and the **broker's choices** (amount, term, rates, balloon, which fees to finance) and builds the input for the engine. The desktop preview and the API's recalculation both use it, so they always get the same numbers.
 
 ## What it does
 

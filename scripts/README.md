@@ -5,9 +5,9 @@ Developer tools. The launcher is for Windows; it needs Node 24 with pnpm and, ex
 | Script              | What it does                                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `run_local.py`      | Starts the whole app with one command (see below)                                                                                                      |
-| `test_run_local.py` | Safety tests for the launcher: `python -m unittest discover scripts`                                                                                   |
+| `test_run_local.py` | Tests for the launcher: `python -m unittest discover scripts`                                                                                          |
 | `verify.ps1`        | Runs every check (`pnpm verify`): format, lint, typecheck, build, database tests, real-stack tests, then unit and fixture tests                        |
-| `check-finance.mjs` | Finance gate used by CI: passes when every finance test passes except the five documented official cases, each with exactly its documented differences |
+| `check-finance.mjs` | Finance check used in CI: passes if all finance tests pass apart from the five known official cases, and those fail with exactly the documented values |
 
 ## `run_local.py` modes
 
@@ -22,4 +22,4 @@ python scripts/run_local.py cloud        # compiled desktop against the deployed
 
 Closing the desktop window (or Ctrl+C) stops the API and the desktop. PostgreSQL keeps running in Docker with its data; `docker compose stop` stops it.
 
-`verify.ps1` stops at the first failing check. The unit and fixture tests run last and currently fail only on the five official test cases explained in the main README (Known limitations).
+`verify.ps1` stops at the first check that fails. Unit and fixture tests run last, and right now they only fail on the five official test cases (see Known limitations in the main README).

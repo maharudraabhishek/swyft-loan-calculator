@@ -1,13 +1,13 @@
 # API (`@swyft/api`)
 
-The backend: a Fastify `/v1` API that runs on Google Cloud Run. It signs users in with Google (Identity Platform), stores deals, quotes and lender settings in PostgreSQL, and keeps lender logos in Cloud Storage. The desktop app talks only to this API.
+The backend, a Fastify `/v1` API running on Google Cloud Run. It signs users in with Google (Identity Platform), stores deals, quotes and lender settings in PostgreSQL, and keeps lender logos in Cloud Storage. The desktop app talks only to this API.
 
-## What it guarantees
+## How it behaves
 
-- **Every request is checked.** All `/v1` routes except sign-in require a valid session. A unit test reads the route table and checks every protected route for 401.
-- **Users only see their own data.** Queries run as a least-privilege role under PostgreSQL row-level security, and anything belonging to someone else answers 404.
-- **Figures come from the server.** Saving a quote recalculates it from the broker's choices and the stored fee signature, using the same shared engine as the app's preview. The result is stored with an immutable snapshot.
-- **Saves are safe to retry.** Quote saves require an `Idempotency-Key`: a retry returns the original quote, and a different request under the same key is refused.
+- All `/v1` routes except sign-in need a valid session. A unit test walks the route table and checks that every protected route returns 401 without one.
+- Queries run as a least-privilege role under PostgreSQL row-level security, so each user only sees their own data. Anything that belongs to someone else returns 404.
+- When a quote is saved, the API recalculates it from the broker's inputs and the stored fee signature, using the same shared engine as the app's preview, and stores the result with a snapshot that never changes.
+- Quote saves need an `Idempotency-Key` header. Retrying returns the original quote, and a different request with the same key is rejected.
 
 ## Layout
 

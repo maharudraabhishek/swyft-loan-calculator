@@ -35,7 +35,7 @@ Payment timing (`advance` or `arrears`) is a separate setting: advance = arrears
 
 `pnpm --filter @swyft/finance test` runs:
 
-- **The brief's formulas and worked example**, line by line (`brief-math-spec.test.ts`).
-- **SPG's four HTML calculators**, run unmodified over an input grid (`spg-calculators-grid.test.ts`).
-- **The official `test-cases.json`** (`upstream-fixtures.test.ts`). 5 of its 8 cases fail (10 of 49 expected values) because those values contradict SPG's own calculators and schedules. `fixture-disputes.test.ts` proves each one; the main README explains them under Known limitations.
-- **The lender CSV schedules, whole-dollar rounding, dates and domain rules.**
+- The brief's formulas and worked example, line by line (`brief-math-spec.test.ts`).
+- SPG's four HTML calculators, run unmodified over a grid of inputs (`spg-calculators-grid.test.ts`).
+- The official `test-cases.json` (`upstream-fixtures.test.ts`). 5 of its 8 cases fail on 10 of the 49 expected values, where the file disagrees with SPG's calculators and schedules. `fixture-disputes.test.ts` checks each one, and the main README goes through them under Known limitations.
+- The lender CSV schedules, whole-dollar rounding, dates and domain rules.
