@@ -27,7 +27,7 @@ Renderer (React UI, sandboxed)  →  Preload (window.swyft)  →  Main (Node, El
 | `src/renderer/src/quotes/`                | Calculator form, preview, quote log, comparison, client email                                                                        |
 | `src/renderer/src/deals/`, `lenders/`     | Deal list and workspace; lender library and fee-signature editor                                                                     |
 | `src/renderer/src/lib/`, `ui/`            | Hooks (bridge, server data, display options, online status) and form/notice components                                               |
-| `src/test-support/`                       | Test doubles and fixtures (never shipped: excluded from the installer)                                                               |
+| `src/test-support/`                       | Test doubles and fixtures (excluded from the installer)                                                                              |
 | `scripts/`                                | Packaged-app harnesses: `smoke-packaged.mjs`, `auth-e2e.mjs` (real sign-in), `workflow-e2e.mjs` (full broker flow against Cloud Run) |
 
 ## Commands

@@ -1,0 +1,117 @@
+# Build installers: clean up
+#
+# Deletes old test builds from gs://<bucket>/desktop/builds/. Each build is about 380 MB,
+# so they add up. Released versions (desktop/v<version>/) and the update feed
+# (desktop/updates/win/) are never touched, so deleting a build that was released is safe.
+#
+# How to run: Actions → Build installers: clean up → Run workflow (branch: master).
+#   - Delete builds older than: 7 days, 30 days, 90 days, or all builds.
+#   - Dry run (on by default) only lists what would be deleted. Untick it to delete.
+#
+# A build is deleted as a whole, based on when it finished uploading. It shares the "release"
+# queue with the Release workflow, so it never runs while a release is copying files.
+name: 'Build installers: clean up'
+run-name: "Clean up builds (${{ inputs.older_than }}${{ inputs.dry_run && ', dry run' || '' }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      older_than:
+        description: Delete builds older than
+        type: choice
+        options: ['7 days', '30 days', '90 days', 'all builds']
+        default: '30 days'
+      dry_run:
+        description: Dry run (only list what would be deleted)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Clean up builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # for the Google Cloud sign-in
+    env:
+      BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
+      OLDER_THAN: ${{ inputs.older_than }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Find the builds to delete
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_REF" = "refs/heads/master" ] || { echo "::error::Run the clean-up from master."; exit 1; }
+
+          # Every object under desktop/builds/ with its size and upload time (public listing).
+          : > objects.tsv
+          token=""
+          while :; do
+            page=$(curl -sf "https://storage.googleapis.com/storage/v1/b/$BUCKET/o?prefix=desktop/builds/&fields=items(name,size,timeCreated),nextPageToken${token:+&pageToken=$token}")
+            jq -r '.items[]? | [.name, .size, .timeCreated] | @tsv' <<< "$page" >> objects.tsv
+            token=$(jq -r '.nextPageToken // empty' <<< "$page")
+            [ -n "$token" ] || break
+          done
+
+          # One line per build: number, newest upload time, file count, total bytes.
+          awk -F'\t' '{ split($1, p, "/"); b = p[3]; if (b !~ /^[0-9]+$/) next; n[b]++; s[b] += $2; if ($3 > t[b]) t[b] = $3 }
+            END { for (b in n) print b "\t" t[b] "\t" n[b] "\t" s[b] }' objects.tsv | sort -n > builds.tsv
+
+          case "$OLDER_THAN" in
+            'all builds') cutoff="9999" ;;
+            *) cutoff=$(date -u -d "${OLDER_THAN% days} days ago" +%Y-%m-%dT%H:%M:%SZ) ;;
+          esac
+          awk -F'\t' -v c="$cutoff" '$2 < c' builds.tsv > delete.tsv
+          echo "Builds in the bucket: $(wc -l < builds.tsv). To delete ($OLDER_THAN): $(wc -l < delete.tsv)."
+          cat delete.tsv
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        if: inputs.dry_run == false
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_RELEASE_SERVICE_ACCOUNT }}
+
+      - name: Delete the builds
+        if: inputs.dry_run == false
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r build _; do
+            [[ "$build" =~ ^[0-9]+$ ]] || continue
+            gcloud storage rm --recursive "gs://$BUCKET/desktop/builds/$build/"
+          done < delete.tsv
+
+      - name: Write the run summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Build installers: clean up"
+            echo
+            echo "Deletes old test builds from \`desktop/builds/\`. Released versions and the update feed are never touched."
+            echo
+            if [ ! -f delete.tsv ]; then
+              echo "The clean-up didn't run. See the job log."
+            elif [ ! -s delete.tsv ]; then
+              echo "No builds older than $OLDER_THAN. Nothing to delete."
+            else
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "**Dry run.** These builds would be deleted ($OLDER_THAN). Run it again with _Dry run_ unticked to delete them."
+              else
+                echo "**Deleted** these builds ($OLDER_THAN):"
+              fi
+              echo
+              echo "| Build | Uploaded (UTC) | Files | Size (MB) |"
+              echo "| --- | --- | --- | --- |"
+              awk -F'\t' '{ printf "| #%s | %s | %s | %.0f |\n", $1, substr($2, 1, 16), $3, $4 / 1048576 }' delete.tsv
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

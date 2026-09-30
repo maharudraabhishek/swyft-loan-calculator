@@ -4,7 +4,7 @@ A desktop quoting tool for finance brokers. Quote a loan with several lenders, k
 
 The app is built with Electron and React. It talks to a small API on Google Cloud Run backed by PostgreSQL (Cloud SQL) with row-level security. Google sign-in runs through Identity Platform in the system browser, and lender logos live in Cloud Storage, reached only through the API.
 
-**Download (1.1.0):** [Windows 10/11 x64](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-x64-Setup.exe) (unsigned: on first run choose _More info → Run anyway_), macOS [Apple Silicon](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-arm64.dmg) or [Intel](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-x64.dmg) (see _Known limitations_). Each file has a `.sha256` next to it. Version 1.0.0 stays on the [GitHub release](https://github.com/maharudraabhishek/swyft-loan-calculator/releases/tag/v1.0.0). From 1.1.0 the Windows app updates itself.
+**Download (1.1.0):** [Windows 10/11 x64](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-x64-Setup.exe) (not code-signed, so on first run choose _More info → Run anyway_) or macOS [Apple Silicon](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-arm64.dmg) (see _Known limitations_). Each file has a `.sha256` next to it. 1.0.0 is still on the [GitHub release](https://github.com/maharudraabhishek/swyft-loan-calculator/releases/tag/v1.0.0). From 1.1.0 onwards the Windows app updates itself.
 
 ## Architecture
 
@@ -44,22 +44,22 @@ flowchart LR
 
 Each folder has a short README: [`apps/desktop`](apps/desktop/README.md), [`apps/api`](apps/api/README.md), [`packages/finance`](packages/finance/README.md), [`packages/quoting`](packages/quoting/README.md), [`packages/contracts`](packages/contracts/README.md), [`scripts`](scripts/README.md) and [`tests`](tests/README.md).
 
-Design decisions:
+Key principles:
 
-- **One stateless API.** It owns all authorization, recalculates every quote before saving and stores an immutable calculation snapshot.
-- **Same engine everywhere.** Main uses the shared packages for the instant local preview (which also works offline); the API runs the same code for the saved figures, so figures sent by the client are never trusted.
-- **Main owns all network access and secrets.** The renderer's CSP is `connect-src 'none'` and it never sees a token; every HTTP call goes through Main.
+- The API is stateless and handles all authorization. It recalculates every quote before saving it and stores a snapshot of the calculation that never changes.
+- The preview and the saved quote use the same engine. Main runs the shared packages for the instant preview (which also works offline), and the API runs the same code again when saving, so it doesn't rely on figures sent by the app.
+- Main does all the networking and holds all the secrets. The renderer's CSP is `connect-src 'none'` and it never sees a token.
 
 ## Security
 
-- **Electron:** `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. IPC senders and frames are checked, every argument is validated with zod, and navigation, new windows, webviews and permission requests are blocked. The application menu reaches the UI over a single one-way channel that carries only a fixed list of commands (typed in Main, checked again in the preload), and packaged builds have no reload or developer tools.
+- **Electron:** `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. IPC senders and frames are checked, every argument is validated with zod, and navigation, new windows, webviews and permission requests are blocked. Menu commands reach the UI over one Main → Renderer channel that only carries a fixed list of commands (typed in Main and re-checked in the preload). Packaged builds have no reload or DevTools.
 - **Sign-in:** Google sign-in opens in the user's normal browser. The API completes the OAuth flow and returns a single-use code to the app over a loopback redirect protected with PKCE and `state` (flow below).
 - **Sessions:** the API issues opaque tokens. Access tokens last 15 minutes and are held in Main's memory only. The rotating refresh token is stored with `safeStorage` (DPAPI on Windows), bound to the API origin and deleted on sign-out. Reusing a refresh token revokes the whole session, and the server stores only token hashes.
 - **API:** every non-public route requires a valid session (a test enumerates the route table and checks each route for 401), request bodies use strict schemas, and other users' records return 404.
 - **Database:** row-level security on every table. The runtime role owns nothing and cannot bypass RLS; PostgreSQL resolves the user from the request's token hash.
 - **Secrets:** database passwords and the Identity Platform key live in Secret Manager and are read only by Cloud Run. The installer contains no secrets; its only configuration is the public API origin.
 - **Logos:** uploads go app → API → private bucket (PNG, JPEG or WebP, checked by file signature, up to 512 KB). The app holds no cloud credentials.
-- **Updates:** the installed Windows app reads `latest.yml` over HTTPS from the public release bucket and installs only a file whose SHA-512 matches it. Only the release workflow, on a version tag from this repository, can write to the bucket, and only `latest.yml` can ever be replaced. The installers are unsigned, so there is no publisher check.
+- **Updates:** the installed Windows app reads `latest.yml` over HTTPS from the public release bucket and only installs a file whose SHA-512 matches it. Only this repo's workflows running on `master` can write to the bucket, and `latest.yml` is the only file they can overwrite. The installers aren't code-signed, so there's no publisher check.
 
 ```mermaid
 sequenceDiagram
@@ -205,7 +205,7 @@ Every `/v1` route outside `/v1/auth` requires `Authorization: Bearer <access tok
 
 A release builds one container image from the `Dockerfile`. The same image runs the three database jobs and the service. The order is: update the jobs, run `swyft-db-migrate`, run `swyft-db-verify` (roles, RLS and cross-user isolation checks), then deploy `swyft-api`, which keeps its environment, secrets and service account. Rollback routes traffic back to the previous Cloud Run revision.
 
-Deploy the API, with its migrations, before publishing a desktop release that uses new API fields. Installed older versions keep working: the API sends a new optional field (such as `roundPaymentUpToDollar`) only when it is set, and keeps the stored value when an older app saves without it. An account that turns the new setting on should update every installed copy, because an older app rejects fields it does not know.
+The API and its migrations have to go out before any desktop release that depends on new API fields. Older installed versions keep working because the API only sends a new optional field like `roundPaymentUpToDollar` when it's set, and keeps the stored value when an older app saves without it. Anyone who turns the new setting on should update every copy they have installed, since older versions reject fields they don't know.
 
 ## Prerequisites
 
@@ -257,18 +257,34 @@ pnpm test:integration                        # desktop UI + Main code against th
 pnpm test                                    # all package unit tests
 pnpm desktop:package:win                     # Windows installer (uses the public API origin in apps/desktop/.env.production)
 pnpm desktop:package:mac                     # macOS disk images, Apple Silicon and Intel (run on a Mac)
-node scripts/check-finance.mjs               # finance tests; passes when only the five documented official cases differ
+node scripts/check-finance.mjs               # finance tests, allowing only the five known official failures
 ```
 
-Installers are written to `apps/desktop/dist/`. `pnpm verify` runs every check and fails only on the five official test cases explained at the end of _Known limitations_.
+Installers are written to `apps/desktop/dist/`. `pnpm verify` runs every check. Right now it only fails on the five official test cases covered at the end of _Known limitations_.
 
-### Continuous integration and releases
+### CI/CD
 
-GitHub Actions only builds and tests; installers are stored in Google Cloud Storage.
+GitHub Actions runs the checks and builds the installers. The installers are stored in the release bucket on Google Cloud Storage, not on GitHub.
 
-- **CI** (`.github/workflows/ci.yml`, every push to `master` and every pull request): the `pnpm verify` checks on Linux, with the database and real-stack tests on PostgreSQL in Docker, plus the desktop tests on Windows. Finance runs through `scripts/check-finance.mjs`, so CI is green only when every test passes except the five documented official cases, each with exactly its documented differences.
-- **Release** (`.github/workflows/release.yml`, a `vX.Y.Z` tag matching `apps/desktop/package.json`): builds the Windows installer and the macOS disk images and uploads them with SHA-256 checksums to `gs://<release bucket>/desktop/<tag>/`. It then publishes the Windows update feed in `desktop/updates/win/`: the installer and its blockmap first, `latest.yml` last. The runner signs in to Google Cloud with GitHub's short-lived OIDC token (Workload Identity Federation), so GitHub stores no cloud key, and its service account can add files to the bucket but never replace or delete them, except `latest.yml`. Running the workflow by hand builds without uploading.
-- **Automatic updates** (installed Windows app): the app checks the feed at start-up and every 6 hours and downloads a new version in the background. A notice then offers _Restart and update_; otherwise the update installs when the app is next closed. Being offline is silent. Development runs and macOS builds never check (macOS updates need an Apple signature).
+| Workflow                       | When it runs                            | What it does                                                                                                                                    |
+| ------------------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CI**                         | Every pull request and push to `master` | Format, lint, typecheck, build and all the tests. No installers.                                                                                |
+| **Build installers**           | By hand, on `master`                    | Builds the Windows installer and both Mac images into `desktop/builds/<build number>/`. The run page has the download links and the tag to use. |
+| **Release**                    | By hand, with a build number            | Publishes that build to `desktop/v<version>/` and updates the Windows update feed. It doesn't build or tag anything.                            |
+| **Build installers: clean up** | By hand                                 | Deletes test builds older than 7, 30 or 90 days, or all of them. It's a dry run unless you untick it, and it never touches releases.            |
+
+To release a new version:
+
+1. Bump `version` in `apps/desktop/package.json` and merge to `master`. If the release depends on API changes, deploy the API first.
+2. Run **Build installers** (Actions → Build installers → Run workflow) and test the installers linked on its run page.
+3. Tag the build's commit and push the tag. The run page has the command, e.g. `git tag -a v1.2.0 <commit> -m "Swyft Finance 1.2.0"` then `git push origin v1.2.0`.
+4. Run **Release** with that build number.
+
+Release won't copy anything unless the build is complete, the tag points at the build's commit and the version is newer than the one installed apps are offered now. It then checks the copies match the build before it updates the feed. If it fails part way, run it again with the same build and it carries on. Pushing a tag on its own doesn't start anything.
+
+The workflows sign in to Google Cloud with GitHub's short-lived OIDC token (Workload Identity Federation), so there's no cloud key stored in GitHub. Uploaded files can't be overwritten; the only file that ever changes is the update feed's `latest.yml`.
+
+Installed Windows apps check the feed at start-up and every 6 hours, download a new version in the background and show a _Restart and update_ notice. If you don't restart, the update installs the next time the app closes. Development runs and macOS builds don't check (macOS updates need an Apple signature).
 
 Testing approach:
 
@@ -282,15 +298,15 @@ Testing approach:
 
 ## Finance validation
 
-The engine follows the brief's formulas with full-precision decimals and rounds each payment and commission to the cent only at the end. The evidence is in `packages/finance/tests`:
+The engine follows the brief's formulas with full-precision decimals and only rounds the payment and commission to the cent at the end. The tests behind everything below are in `packages/finance/tests`:
 
-- **Brief formulas and worked example:** all match. The brief prints the intermediate (1+i)^60 as 1.52699, which is a misprint (the exact value is 1.52730); only full precision reaches its final $650.68.
+- **Brief formulas and worked example:** all match. The brief prints the intermediate (1+i)^60 as 1.52699, which is a misprint (the exact value is 1.52730). You only get its final $650.68 with full precision.
 - **SPG's four HTML calculators, run unmodified:**
   - Traditional and Pepper: every displayed figure is identical.
   - Branded: every payment is identical.
   - Autopay: NAF, commission, principal and first interest are identical.
-  - The remaining differences are explained under _Assumptions_.
-- **`test-cases.json`:** 3 of 8 cases pass fully; 39 of the 49 expected values match. The other 10 values, in 5 cases, contradict SPG's own calculators or schedules (`fixture-disputes.test.ts`); they are explained at the end of _Known limitations_. No fixture was edited.
+  - The other differences are covered under _Assumptions_.
+- **`test-cases.json`:** 3 of the 8 cases pass completely and 39 of the 49 expected values match. The other 10 values (in 5 cases) disagree with SPG's calculators or lender schedules; `fixture-disputes.test.ts` has the checks and the end of _Known limitations_ goes through them. I haven't edited any fixture.
 - **Lender schedules in the brief:**
   - Traditional: the CSV payments do not repay their own loans ($538.15 remains after 60 payments); the engine and SPG's calculator agree.
   - Pepper: within 1–9¢ (the 0.4 loading factor is reverse-engineered).
@@ -298,7 +314,7 @@ The engine follows the brief's formulas with full-precision decimals and rounds 
   - Autopay 84-month schedule: every row within $0.01 when settled on the date its first interest implies (the CSV marks its settlement date as approximate).
 - **Broker receives (commission + GST):** exact, $2,400.15 and $2,491.50 (Traditional).
 
-## Design questions from the brief
+## Design decisions
 
 - **Floating-point precision.** Money and rates are Decimal.js values in `@swyft/finance`, using a dedicated Decimal clone (40 significant digits, round half-up). They cross IPC, HTTP and PostgreSQL (`numeric`) as decimal strings, never as binary floats, and are rounded only for the final payment, commission and display.
 - **Adding a commission model.** `calculateQuote` dispatches on the input's `model` to one calculator per model (capitalised, overs, loaded, daily), with typed inputs and results. `@swyft/quoting` maps a fee signature's `commission_model` and parameters onto that input. A new model needs a new input/result type, a calculator, a mapping case, a schema value and a UI label; payment timing stays a separate setting.
@@ -327,10 +343,11 @@ The engine follows the brief's formulas with full-precision decimals and rounds 
 - If the OS offers no secure storage, the session is kept in memory only, and the app says so.
 - NSW business-day dates cover 2025–2032.
 - Sign-in rate limits are per Cloud Run instance (at most 3); there is no Cloud Armor.
-- The Windows installer is unsigned. The macOS disk images are ad-hoc signed and not notarised (no Apple Developer ID), so macOS asks for _System Settings → Privacy & Security → Open Anyway_ on first launch; they have not yet been tested on a Mac. Automatic updates are Windows-only, and version 1.0.0 has no updater, so 1.0.0 users install 1.1.0 by hand once.
-- **Five official test cases fail, and the engine is right in each.** `test-cases.json` has 8 cases with 49 expected values. 3 cases match fully; the other 5 cases differ on 10 values. For each of them, SPG's own HTML calculator (run unmodified in `fixture-disputes.test.ts`) gives the engine's figure, or SPG's own lender schedule shows that the expected figure cannot be calculated from the case's inputs. No fixture was changed to make a test pass, so the fixture test stays red on purpose.
-  - **westpac-basic** (3 values). SPG's calculator gives $646.10 a month, a 10.25% comparison rate and $7,051.27 interest; so does the engine. The expected $656.19 is the payment on $32,209.80, which is the case's own total financed ($31,714.80) plus the $495 fee a second time. The expected $7,656.60 interest is 60 × $656.19 − $31,714.80, so it carries the same error. The expected 9.23% comparison rate fits neither payment: on the NAF (the basis `test-cases.json` itself prescribes), $646.10 gives 10.25% and $656.19 would give 10.94%.
-  - **westpac-with-balloon** (2 values). SPG's calculator gives $914.16 and 9.63% for these inputs; so does the engine. No combination of payment timing, financed fee, commission and balloon that we tried gives the expected $844.22, and $844.22 would not give the expected 8.78% either (it gives 6.97% on the NAF).
-  - **pepper-origination-financed** (1 value). SPG's Pepper calculator gives an amount financed of $35,846.08, as the engine does (expected $35,845.85). The monthly payment, $794.50, matches.
-  - **pepper-all-fees-financed** (2 values). SPG's calculator gives $36,362.53 financed and $805.95 a month, as the engine does (expected $36,352.85 and $805.73). The expected payment follows from the expected amount financed.
-  - **autopay-daily-interest** (2 values). The monthly payment ($1,767.42), day counts and dates match. SPG's calculator gives first-payment interest of $147.11 (actual/365), as the engine does. The expected $147.01 uses ÷365.25, taken from one real lender schedule; the brief, `lender-configs.json`, SPG's calculator and the other Autopay schedule all use ÷365. The expected second-payment interest, $495.29, is row 2 of that schedule, where payment 1 failed and payment 2 opens at $84,219.20 instead of payment 1's closing $84,084.45. No calculation from the loan inputs can produce it; the engine gives $639.16.
+- 1.1.0 shipped without the Intel Mac image because of a mistake in the build script. That's fixed, and the next release will include it.
+- The Windows installer isn't code-signed. The Mac image is only ad-hoc signed and isn't notarised (I don't have an Apple Developer ID), so the first time you open it macOS needs _System Settings → Privacy & Security → Open Anyway_. I haven't tested it on a Mac yet. Automatic updates are Windows-only, and 1.0.0 has no updater, so anyone on 1.0.0 has to install 1.1.0 manually once.
+- **5 of the 8 official test cases fail.** `test-cases.json` has 49 expected values across its 8 cases. 3 cases match completely and the other 5 are off on 10 values. I checked each of those 10 against SPG's HTML calculators (run unmodified in `fixture-disputes.test.ts`) and the lender CSV schedules, and I've written up what I found for each case below. I've left the fixtures as they are, so `upstream-fixtures.test.ts` still fails on these five.
+  - **westpac-basic** (3 values). SPG's Traditional calculator shows $646.10 a month, a 10.25% comparison rate and $7,051.27 interest, which is what the engine gives too. The expected $656.19 turns out to be the payment on $32,209.80, which is the total financed stated in the same case ($31,714.80) with the $495 fee added a second time. The expected interest of $7,656.60 is 60 × $656.19 − $31,714.80, so it's off for the same reason. The expected 9.23% comparison rate doesn't match either payment. Worked out on the NAF (the basis `test-cases.json` says to use), $646.10 gives 10.25% and $656.19 would give 10.94%.
+  - **westpac-with-balloon** (2 values). For these inputs SPG's calculator shows $914.16 and 9.63%, the same as the engine. I tried the obvious variations (advance or arrears, fee financed or not, with or without commission, balloon as $13,500 or as 30% of the total financed) and none of them gives $844.22. Even $844.22 wouldn't give the expected 8.78%; on the NAF it comes to 6.97%.
+  - **pepper-origination-financed** (1 value). SPG's Pepper calculator shows $35,846.08 financed, the same as the engine; the file expects $35,845.85. The $794.50 monthly payment matches.
+  - **pepper-all-fees-financed** (2 values). SPG's calculator shows $36,362.53 financed and $805.95 a month, the same as the engine; the file expects $36,352.85 and $805.73. $805.73 is simply the payment on $36,352.85, so the payment is only off because the amount financed is.
+  - **autopay-daily-interest** (2 values). The monthly payment ($1,767.42), day counts and dates all match. For the first payment's interest, SPG's calculator shows $147.11 using actual/365, the same as the engine. The file's $147.01 comes from dividing by 365.25, which is what one of the real lender schedules does; the brief, `lender-configs.json`, SPG's calculator and the other Autopay schedule all divide by 365. The expected second-payment interest of $495.29 is row 2 of that same schedule, where payment 1 failed and payment 2 starts from $84,219.20 instead of the $84,084.45 left after payment 1. That can't be worked out from the loan inputs; the engine gives $639.16.

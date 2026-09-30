@@ -1,6 +1,11 @@
-# Every push to master and every pull request: the same checks as `pnpm verify`.
-# Linux runs everything that needs PostgreSQL (Docker); Windows runs the desktop tests
-# on the platform the app ships for. Nothing is uploaded, so no artifact storage is used.
+# CI
+#
+# Checks every push to master and every pull request with the same checks as
+# `pnpm verify`: format, lint, typecheck, build and all the tests. Linux runs everything
+# that needs PostgreSQL (in Docker); Windows runs the desktop tests, since that's the
+# platform the app ships for. It doesn't build installers or upload anything.
+#
+# How to run: it runs on its own. To re-run it, open the run and use "Re-run jobs".
 name: CI
 
 on:
@@ -41,13 +46,16 @@ jobs:
         run: pnpm test:integration
       - name: Unit tests
         run: pnpm -r --filter '!@swyft/finance' run test
-      # The official test-cases.json suite stays red on purpose (see README, Known
-      # limitations). This step shows that result as it is and may fail; the next step
-      # is the gate, which fails on any other finance failure and on any change to the
-      # documented differences.
-      - name: Official fixtures (documented upstream contradictions, allowed to fail)
+      # Expected to fail. 5 of the 8 official test-cases.json cases disagree with SPG's
+      # calculators and schedules (see Known limitations in the README), so this step
+      # fails and Vitest adds a red annotation for each of the five. That is expected:
+      # continue-on-error lets the job pass. The next step is the real check. It fails
+      # on any other finance failure, or if the differences in those five cases change.
+      - name: Official fixtures (5 known failures, expected, allowed to pass)
         continue-on-error: true
-        run: pnpm --filter @swyft/finance exec vitest run tests/upstream-fixtures.test.ts
+        run: |
+          echo "::notice title=Official fixtures::5 of the 8 official test cases fail as expected (see Known limitations in the README). The red annotations from this step are expected and don't fail the job."
+          pnpm --filter @swyft/finance exec vitest run tests/upstream-fixtures.test.ts
       - name: Finance tests (only the five documented official cases may differ)
         run: node scripts/check-finance.mjs
       - name: Launcher tests

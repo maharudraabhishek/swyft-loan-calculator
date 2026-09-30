@@ -1,0 +1,182 @@
+# Build installers
+#
+# Builds the Windows installer and the two macOS disk images (Apple Silicon and Intel)
+# from master and stores them in the release bucket under a build number:
+#
+#   gs://<bucket>/desktop/builds/<build number>/
+#
+# Use it to get installers for testing. It doesn't publish anything: when a build is good,
+# tag its commit and run the Release workflow with its build number. The run page has the
+# download links, the checksums and the tag command for that build.
+#
+# How to run: Actions → Build installers → Run workflow (branch: master).
+#
+# Uploads use GitHub's short-lived OIDC token (Workload Identity Federation), so there's no
+# cloud key in GitHub. The bucket and service account come from the repository variables
+# GCP_RELEASE_BUCKET, GCP_RELEASE_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER.
+name: Build installers
+run-name: 'Build #${{ github.run_number }} from ${{ github.ref_name }}'
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    if: github.ref == 'refs/heads/master'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2025
+            script: desktop:package:win
+            pattern: '*.exe'
+          - name: macOS
+            os: macos-15
+            script: desktop:package:mac
+            pattern: '*.dmg'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # for the Google Cloud sign-in
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      DESTINATION: ${{ vars.GCP_RELEASE_BUCKET }}/desktop/builds/${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0 (version from packageManager)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Read the app version
+        id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./apps/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Uses the public API origin in apps/desktop/.env.production.
+      - run: pnpm run ${{ matrix.script }}
+
+      - name: Collect the installers and their checksums
+        shell: bash
+        run: |
+          mkdir out
+          cp apps/desktop/dist/${{ matrix.pattern }} out/
+          cd out
+          for file in *; do
+            if command -v sha256sum > /dev/null; then
+              sha256sum "$file" > "$file.sha256"
+            else
+              shasum -a 256 "$file" > "$file.sha256"
+            fi
+          done
+          ls -l
+
+      # Windows also needs the update feed files (blockmap and latest.yml) so Release can
+      # publish them, and build.json records what this build is.
+      - name: Collect the update feed and build details
+        if: matrix.name == 'Windows'
+        shell: bash
+        run: |
+          cp apps/desktop/dist/*.exe.blockmap apps/desktop/dist/latest.yml out/
+          grep -q "^version: ${{ steps.version.outputs.version }}$" out/latest.yml
+          printf '{"version":"%s","commit":"%s","build":%s}\n' \
+            "${{ steps.version.outputs.version }}" "$GITHUB_SHA" "$GITHUB_RUN_NUMBER" > out/build.json
+          cat out/build.json
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_RELEASE_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3.0.0
+        with:
+          path: out
+          destination: ${{ env.DESTINATION }}
+          parent: false
+          gzip: false
+          process_gcloudignore: false
+
+      - name: Add the files to the run page
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.name }}"
+            if compgen -G "out/*.sha256" > /dev/null; then
+              echo "| File | Size (bytes) | SHA-256 |"
+              echo "| --- | --- | --- |"
+              for checksum in out/*.sha256; do
+                file=$(basename "${checksum%.sha256}")
+                echo "| \`$file\` | $(wc -c < "out/$file" | tr -d ' ') | \`$(cut -d' ' -f1 "$checksum")\` |"
+              done
+            else
+              echo "Nothing was built. See the job log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  summary:
+    name: Summary
+    needs: package
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Write the run summary
+        shell: bash
+        env:
+          RESULT: ${{ needs.package.result }}
+          VERSION: ${{ needs.package.outputs.version }}
+          BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Build installers
+
+          Builds the installers from `master` for testing. Nothing is published. When a build is good, tag its commit and run **Release** with its build number.
+
+          EOF
+          {
+            if [ "$GITHUB_REF" != "refs/heads/master" ]; then
+              echo "This was run on \`$GITHUB_REF_NAME\`. Builds only run on \`master\`, so nothing was built. Run it again with branch \`master\`."
+            elif [ "$RESULT" != "success" ]; then
+              echo "The build failed, so it can't be released. Check the failed job and run it again."
+            else
+              base="https://storage.googleapis.com/$BUCKET/desktop/builds/$GITHUB_RUN_NUMBER"
+              # The last release is the version the update feed offers installed apps now.
+              last=$(curl -sf "https://storage.googleapis.com/$BUCKET/desktop/updates/win/latest.yml?check=$GITHUB_RUN_ID" | sed -n 's/^version: //p' || true)
+              # newer A B: true if version A is higher than version B.
+              newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+              echo "**Build #$GITHUB_RUN_NUMBER**: version $VERSION, commit \`${GITHUB_SHA:0:7}\`"
+              echo
+              echo "- Windows: [Swyft-Finance-$VERSION-x64-Setup.exe]($base/Swyft-Finance-$VERSION-x64-Setup.exe)"
+              echo "- macOS Apple Silicon: [Swyft-Finance-$VERSION-arm64.dmg]($base/Swyft-Finance-$VERSION-arm64.dmg)"
+              echo "- macOS Intel: [Swyft-Finance-$VERSION-x64.dmg]($base/Swyft-Finance-$VERSION-x64.dmg)"
+              echo "- Checksums: add \`.sha256\` to a link. They're also listed per platform below."
+              echo
+              echo "**To release this build**"
+              echo
+              echo "Last release: ${last:+v$last}${last:-none}."
+              if [ -n "$last" ] && ! newer "$VERSION" "$last"; then
+                echo
+                echo "> Version $VERSION isn't newer than v$last. Bump \`version\` in \`apps/desktop/package.json\`, merge, and build again."
+              else
+                echo
+                echo "1. Tag the commit (suggested tag \`v$VERSION\`, from \`apps/desktop/package.json\`):"
+                echo
+                echo '   ```'
+                echo "   git tag -a v$VERSION $GITHUB_SHA -m \"Swyft Finance $VERSION\""
+                echo "   git push origin v$VERSION"
+                echo '   ```'
+                echo "2. Run **Release** with build \`$GITHUB_RUN_NUMBER\`."
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
