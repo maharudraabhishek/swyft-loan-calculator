@@ -12,7 +12,7 @@
     "test": "vitest run",
     "build": "electron-vite build",
     "package:win": "electron-vite build && electron-builder --win nsis --publish never",
-    "package:mac": "electron-vite build && electron-builder --mac dmg --publish never",
+    "package:mac": "electron-vite build && electron-builder --mac --publish never",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },

@@ -4,7 +4,7 @@ A desktop quoting tool for finance brokers. Quote a loan with several lenders, k
 
 The app is built with Electron and React. It talks to a small API on Google Cloud Run backed by PostgreSQL (Cloud SQL) with row-level security. Google sign-in runs through Identity Platform in the system browser, and lender logos live in Cloud Storage, reached only through the API.
 
-**Download (1.1.0):** [Windows 10/11 x64](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-x64-Setup.exe) (unsigned: on first run choose _More info → Run anyway_), macOS [Apple Silicon](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-arm64.dmg) or [Intel](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-x64.dmg) (see _Known limitations_). Each file has a `.sha256` next to it. Version 1.0.0 stays on the [GitHub release](https://github.com/maharudraabhishek/swyft-loan-calculator/releases/tag/v1.0.0). From 1.1.0 the Windows app updates itself.
+**Download (1.1.0):** [Windows 10/11 x64](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-x64-Setup.exe) (unsigned: on first run choose _More info → Run anyway_), macOS [Apple Silicon](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-arm64.dmg) (see _Known limitations_). Each file has a `.sha256` next to it. Version 1.0.0 stays on the [GitHub release](https://github.com/maharudraabhishek/swyft-loan-calculator/releases/tag/v1.0.0). From 1.1.0 the Windows app updates itself.
 
 ## Architecture
 
@@ -44,7 +44,7 @@ flowchart LR
 
 Each folder has a short README: [`apps/desktop`](apps/desktop/README.md), [`apps/api`](apps/api/README.md), [`packages/finance`](packages/finance/README.md), [`packages/quoting`](packages/quoting/README.md), [`packages/contracts`](packages/contracts/README.md), [`scripts`](scripts/README.md) and [`tests`](tests/README.md).
 
-Design decisions:
+Key principles:
 
 - **One stateless API.** It owns all authorization, recalculates every quote before saving and stores an immutable calculation snapshot.
 - **Same engine everywhere.** Main uses the shared packages for the instant local preview (which also works offline); the API runs the same code for the saved figures, so figures sent by the client are never trusted.
@@ -298,7 +298,7 @@ The engine follows the brief's formulas with full-precision decimals and rounds 
   - Autopay 84-month schedule: every row within $0.01 when settled on the date its first interest implies (the CSV marks its settlement date as approximate).
 - **Broker receives (commission + GST):** exact, $2,400.15 and $2,491.50 (Traditional).
 
-## Design questions from the brief
+## Design decisions
 
 - **Floating-point precision.** Money and rates are Decimal.js values in `@swyft/finance`, using a dedicated Decimal clone (40 significant digits, round half-up). They cross IPC, HTTP and PostgreSQL (`numeric`) as decimal strings, never as binary floats, and are rounded only for the final payment, commission and display.
 - **Adding a commission model.** `calculateQuote` dispatches on the input's `model` to one calculator per model (capitalised, overs, loaded, daily), with typed inputs and results. `@swyft/quoting` maps a fee signature's `commission_model` and parameters onto that input. A new model needs a new input/result type, a calculator, a mapping case, a schema value and a UI label; payment timing stays a separate setting.
@@ -327,6 +327,7 @@ The engine follows the brief's formulas with full-precision decimals and rounds 
 - If the OS offers no secure storage, the session is kept in memory only, and the app says so.
 - NSW business-day dates cover 2025–2032.
 - Sign-in rate limits are per Cloud Run instance (at most 3); there is no Cloud Armor.
+- 1.1.0 has no Intel Mac image (the build produced Apple Silicon only); the build is fixed and the next release includes it.
 - The Windows installer is unsigned. The macOS disk images are ad-hoc signed and not notarised (no Apple Developer ID), so macOS asks for _System Settings → Privacy & Security → Open Anyway_ on first launch; they have not yet been tested on a Mac. Automatic updates are Windows-only, and version 1.0.0 has no updater, so 1.0.0 users install 1.1.0 by hand once.
 - **Five official test cases fail, and the engine is right in each.** `test-cases.json` has 8 cases with 49 expected values. 3 cases match fully; the other 5 cases differ on 10 values. For each of them, SPG's own HTML calculator (run unmodified in `fixture-disputes.test.ts`) gives the engine's figure, or SPG's own lender schedule shows that the expected figure cannot be calculated from the case's inputs. No fixture was changed to make a test pass, so the fixture test stays red on purpose.
   - **westpac-basic** (3 values). SPG's calculator gives $646.10 a month, a 10.25% comparison rate and $7,051.27 interest; so does the engine. The expected $656.19 is the payment on $32,209.80, which is the case's own total financed ($31,714.80) plus the $495 fee a second time. The expected $7,656.60 interest is 60 × $656.19 − $31,714.80, so it carries the same error. The expected 9.23% comparison rate fits neither payment: on the NAF (the basis `test-cases.json` itself prescribes), $646.10 gives 10.25% and $656.19 would give 10.94%.

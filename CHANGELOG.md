@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The macOS build now produces the Intel disk image as well as the Apple Silicon one (1.1.0 shipped Apple Silicon only).
+
 ## 1.1.0 (2026-09-30)
 
 Deploy the API (migration `0003`) before publishing this desktop version.
@@ -10,7 +16,7 @@ Deploy the API (migration `0003`) before publishing this desktop version.
 - **Remembered window:** size, position, maximised and full-screen state are restored on the next launch, only onto a screen that is still connected. Bounds are kept on whole screen pixels, so the window does not creep larger at display scales such as 125%.
 - **Whole-dollar repayments:** a custom fee signature can round the repayment up to the next dollar; the final instalment is reduced so the loan closes exactly, and commission is unchanged. Off by default, so every existing quote is unchanged.
 - **Automatic updates (Windows):** the installed app checks for a new version at start-up and every 6 hours, downloads it in the background and offers _Restart and update_; otherwise it installs when the app is next closed. 1.0.0 has no updater, so install 1.1.0 by hand once.
-- **macOS builds:** disk images for Apple Silicon and Intel (ad-hoc signed, not notarised).
+- **macOS build:** a disk image for Apple Silicon (ad-hoc signed, not notarised). The Intel image was not built for this release.
 - **CI and releases:** GitHub Actions runs every check on each push and pull request; a version tag builds the installers and uploads them, with the update feed, to Cloud Storage. Downloads moved from GitHub Releases to Cloud Storage; the 1.0.0 GitHub release is unchanged.
 - READMEs for each app, package and folder.
 
