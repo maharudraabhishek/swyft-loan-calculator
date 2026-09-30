@@ -1,5 +1,5 @@
 {
-  "name": "swyft-finance-stage-2",
+  "name": "swyft-loan-calculator",
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@11.22.0",
