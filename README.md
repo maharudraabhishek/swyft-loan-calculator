@@ -59,7 +59,7 @@ Key principles:
 - **Database:** row-level security on every table. The runtime role owns nothing and cannot bypass RLS; PostgreSQL resolves the user from the request's token hash.
 - **Secrets:** database passwords and the Identity Platform key live in Secret Manager and are read only by Cloud Run. The installer contains no secrets; its only configuration is the public API origin.
 - **Logos:** uploads go app → API → private bucket (PNG, JPEG or WebP, checked by file signature, up to 512 KB). The app holds no cloud credentials.
-- **Updates:** the installed Windows app reads `latest.yml` over HTTPS from the public release bucket and only installs a file whose SHA-512 matches it. Only this repo's workflows running on `master` can write to the bucket, and `latest.yml` is the only file they can overwrite. The installers aren't code-signed, so there's no publisher check.
+- **Updates:** the installed Windows app reads `latest.yml` over HTTPS from the public release bucket and only installs a file whose SHA-512 matches it. Only this repo's workflows, running on `master` or a version tag, can write to the bucket, and `latest.yml` is the only file they can overwrite. The installers aren't code-signed, so there's no publisher check.
 
 ```mermaid
 sequenceDiagram
@@ -264,27 +264,40 @@ Installers are written to `apps/desktop/dist/`. `pnpm verify` runs every check. 
 
 ### CI/CD
 
-GitHub Actions runs the checks and builds the installers. The installers are stored in the release bucket on Google Cloud Storage, not on GitHub.
+GitHub Actions runs the checks and builds the installers. The installers live in the release bucket on Google Cloud Storage, not on GitHub.
 
-| Workflow                       | When it runs                            | What it does                                                                                                                                    |
-| ------------------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CI**                         | Every pull request and push to `master` | Format, lint, typecheck, build and all the tests. No installers.                                                                                |
-| **Build installers**           | By hand, on `master`                    | Builds the Windows installer and both Mac images into `desktop/builds/<build number>/`. The run page has the download links and the tag to use. |
-| **Release**                    | By hand, with a build number            | Publishes that build to `desktop/v<version>/` and updates the Windows update feed. It doesn't build or tag anything.                            |
-| **Build installers: clean up** | By hand                                 | Deletes test builds older than 7, 30 or 90 days, or all of them. It's a dry run unless you untick it, and it never touches releases.            |
+| Workflow                       | When it runs                            | What it does                                                                                                                                           |
+| ------------------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **CI**                         | Every pull request and push to `master` | Format, lint, typecheck, build and all the tests. No installers.                                                                                       |
+| **Build installers**           | By hand, with a version                 | Builds the Windows installer and both Mac images from `master` into `desktop/builds/<build number>/` for testing. The run page has the download links. |
+| **Release**                    | When you publish a GitHub release       | Publishes the tested build of that version, updates the Windows update feed and adds the download links to the release notes. It doesn't build or tag. |
+| **Build installers: clean up** | By hand                                 | Deletes test builds older than 7, 30 or 90 days, or all of them. It's a dry run unless you untick it, and it never touches releases.                   |
 
-To release a new version:
+#### How to release
 
-1. Bump `version` in `apps/desktop/package.json` and merge to `master`. If the release depends on API changes, deploy the API first.
-2. Run **Build installers** (Actions → Build installers → Run workflow) and test the installers linked on its run page.
-3. Tag the build's commit and push the tag. The run page has the command, e.g. `git tag -a v1.2.0 <commit> -m "Swyft Finance 1.2.0"` then `git push origin v1.2.0`.
-4. Run **Release** with that build number.
+The usual way, all on GitHub:
 
-Release won't copy anything unless the build is complete, the tag points at the build's commit and the version is newer than the one installed apps are offered now. It then checks the copies match the build before it updates the feed. If it fails part way, run it again with the same build and it carries on. Pushing a tag on its own doesn't start anything.
+1. **Build.** Actions → **Build installers** → Run workflow (branch `master`). Enter the new version, e.g. `1.1.1`. It has to be higher than the current release.
+2. **Test.** Download the installers from the run page and try them.
+3. **Publish.** Releases → **Draft a new release**. Type the tag `v1.1.1` and let GitHub create it on publish, with target `master`. Click **Generate release notes**, edit them if you want, then **Publish release**.
 
-The workflows sign in to Google Cloud with GitHub's short-lived OIDC token (Workload Identity Federation), so there's no cloud key stored in GitHub. Uploaded files can't be overwritten; the only file that ever changes is the update feed's `latest.yml`.
+Publishing starts the **Release** workflow. In a minute or two the installers are in `desktop/v1.1.1/`, the download links and checksums are added to your release notes, and installed Windows apps offer the update. You don't run anything else.
 
-Installed Windows apps check the feed at start-up and every 6 hours, download a new version in the background and show a _Restart and update_ notice. If you don't restart, the update installs the next time the app closes. Development runs and macOS builds don't check (macOS updates need an Apple signature).
+Things to know:
+
+- Release publishes the build made from the commit the tag points at. If something was merged to `master` after you built, build again before you publish.
+- If the release needs API changes, deploy the API before you publish.
+- A draft doesn't start anything, and neither does a pre-release (untick _Set as a pre-release_).
+- You don't edit `apps/desktop/package.json` to release. The version comes from step 1; `package.json` only matters for local builds.
+
+#### Running Release by hand
+
+Actions → **Release** → Run workflow (branch `master`) and enter the tag, e.g. `v1.1.1`. Use this to:
+
+- **retry** a release that failed. Fix what the error said, then run it again. It carries on from where it stopped and doesn't duplicate anything;
+- **release a tag you pushed from git** without making a release page. It creates the page, with generated notes and the download links.
+
+Either way it checks the same things before copying anything: there's a complete build of that version from the tag's commit, and the version is higher than the current release. The copies are checked against the build before installed apps are told about them.
 
 Testing approach:
 

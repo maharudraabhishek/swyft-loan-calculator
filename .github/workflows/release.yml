@@ -1,31 +1,34 @@
 # Release
 #
-# Publishes a build made by the Build installers workflow. It doesn't build anything and it
-# doesn't create tags: you pick the build, you create the tag, and this copies that build's
-# files to the release folder and updates the Windows update feed.
+# Publishes a tested build when you publish a GitHub release. You create the tag and the
+# release; this workflow doesn't build anything or create tags. It:
+#   - finds the build of that version (Build installers) made from the commit the tag is on,
+#   - copies its files to gs://<bucket>/desktop/v<version>/ (the download links) and checks
+#     they're the same bytes as the build,
+#   - updates the Windows update feed in gs://<bucket>/desktop/updates/win/, which is what
+#     makes installed apps offer the new version,
+#   - adds the download links and checksums to the release notes.
 #
-#   gs://<bucket>/desktop/v<version>/     installers and .sha256 files (download links)
-#   gs://<bucket>/desktop/updates/win/    installer, blockmap and latest.yml (auto-update feed)
+# How it runs:
+#   - Automatically when a release is published: Releases → Draft a new release, tag
+#     v<version> on master, Generate release notes, Publish release.
+#   - By hand to retry, or after pushing a tag without a release page: Actions → Release →
+#     Run workflow (branch: master), enter the tag. It creates the release page if needed.
 #
-# How to run:
-#   1. Run Build installers on master and test the installers from its run page.
-#   2. Tag that build's commit with its version and push the tag (the build page has the
-#      command), e.g. git tag -a v1.2.0 <commit> -m "Swyft Finance 1.2.0".
-#   3. Actions → Release → Run workflow (branch: master), enter the build number.
-#
-# Before copying anything it checks that the build is complete, that the tag exists and
-# points at the build's commit, and that the version is newer than the one installed apps
-# are offered now. The update feed is written last, so apps only see the new version once
-# everything else is in place. If a release fails part way, running it again finishes it.
-# Only one release runs at a time.
+# It stops before copying anything if there's no complete build of that version from the
+# tag's commit, if the version isn't higher than the current release, or if the release is
+# marked as a pre-release. Running it again is safe: it finishes a release that stopped part
+# way and refreshes the download links. Only one release runs at a time.
 name: Release
-run-name: 'Release build #${{ inputs.build }}'
+run-name: 'Release ${{ github.event.release.tag_name || inputs.tag }}'
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
-      build:
-        description: 'Build number to release (the # in the Build installers run title)'
+      tag:
+        description: 'Tag to release, e.g. v1.1.1'
         required: true
 
 permissions:
@@ -41,10 +44,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
-      contents: read
+      contents: write # edits the release notes (or creates the page on an existing tag)
       id-token: write # for the Google Cloud sign-in
     env:
-      BUILD: ${{ inputs.build }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      PRERELEASE: ${{ github.event.release.prerelease || false }}
       BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,42 +56,62 @@ jobs:
           fetch-depth: 0 # all tags
           persist-credentials: false
 
-      - name: Check the build, the tag and the version
+      - name: Find the build and check the version
         shell: bash
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
           newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
 
-          [ "$GITHUB_REF" = "refs/heads/master" ] || fail "Run Release from master."
-          [[ "$BUILD" =~ ^[0-9]+$ ]] || fail "The build number should be a number, e.g. 12."
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$GITHUB_REF" != "refs/heads/master" ]; then
+            fail "Run Release from master."
+          fi
+          [ "$PRERELEASE" != "true" ] || fail "$TAG is marked as a pre-release. Pre-releases aren't sent to installed apps; untick it to release."
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "The tag should look like v1.1.1, not $TAG."
+          version="${TAG#v}"
+          commit=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}") || fail "Tag $TAG doesn't exist."
 
+          # The current release is the version the update feed offers installed apps. The same
+          # version is allowed so a re-run can finish it; the file check below still refuses a
+          # different build of a version that's already out.
           public="https://storage.googleapis.com/$BUCKET/desktop"
-          curl -sfL "$public/builds/$BUILD/build.json" -o build.json \
-            || fail "Build #$BUILD isn't in the bucket (never built, failed, or cleaned up)."
-          version=$(jq -r .version build.json)
-          commit=$(jq -r .commit build.json)
-          echo "Build #$BUILD: version $version, commit $commit"
-
-          name="Swyft-Finance-$version"
-          for file in "$name-x64-Setup.exe" "$name-x64-Setup.exe.sha256" "$name-x64-Setup.exe.blockmap" \
-            "$name-arm64.dmg" "$name-arm64.dmg.sha256" "$name-x64.dmg" "$name-x64.dmg.sha256" latest.yml; do
-            curl -sfI "$public/builds/$BUILD/$file" > /dev/null \
-              || fail "Build #$BUILD is missing $file. Only builds where both platforms succeeded can be released."
-          done
-
-          tagged=$(git rev-parse -q --verify "refs/tags/v$version^{commit}") \
-            || fail "Tag v$version doesn't exist. Create it on $commit and push it first (see the build's run page)."
-          [ "$tagged" = "$commit" ] || fail "Tag v$version points at $tagged, but build #$BUILD was made from $commit."
-
-          # The last release is whatever the update feed currently offers installed apps.
           live=$(curl -sf "$public/updates/win/latest.yml?check=$GITHUB_RUN_ID" | sed -n 's/^version: //p' || true)
-          [ "$live" != "$version" ] || fail "v$version is already released."
-          if [ -n "$live" ] && ! newer "$version" "$live"; then
-            fail "Version $version isn't newer than the current release, $live."
+          if [ -n "$live" ] && [ "$live" != "$version" ] && ! newer "$version" "$live"; then
+            fail "Version $version isn't higher than the current release, $live."
           fi
 
-          { echo "VERSION=$version"; echo "COMMIT=$commit"; } >> "$GITHUB_ENV"
+          # Newest complete build of this version made from the tag's commit.
+          builds=""; token=""
+          while :; do
+            page=$(curl -sf "https://storage.googleapis.com/storage/v1/b/$BUCKET/o?prefix=desktop/builds/&fields=items(name),nextPageToken${token:+&pageToken=$token}")
+            builds+=$(jq -r '.items[]?.name | select(test("^desktop/builds/[0-9]+/build\\.json$")) | split("/")[2]' <<< "$page")$'\n'
+            token=$(jq -r '.nextPageToken // empty' <<< "$page")
+            [ -n "$token" ] || break
+          done
+          name="Swyft-Finance-$version"
+          build=""; other=""
+          for n in $(sort -rn <<< "$builds" | grep -E '^[0-9]+$' || true); do
+            info=$(curl -sf "$public/builds/$n/build.json" || true)
+            [ "$(jq -r '.version // empty' <<< "$info")" = "$version" ] || continue
+            if [ "$(jq -r '.commit // empty' <<< "$info")" != "$commit" ]; then
+              other="${other:-#$n (commit $(jq -r '.commit[0:7]' <<< "$info"))}"
+              continue
+            fi
+            complete=yes
+            for file in "$name-x64-Setup.exe" "$name-x64-Setup.exe.sha256" "$name-x64-Setup.exe.blockmap" \
+              "$name-arm64.dmg" "$name-arm64.dmg.sha256" "$name-x64.dmg" "$name-x64.dmg.sha256" latest.yml; do
+              curl -sfI "$public/builds/$n/$file" > /dev/null || { complete=no; echo "Build #$n is missing $file, skipping it"; break; }
+            done
+            [ "$complete" = yes ] && { build=$n; break; }
+          done
+          if [ -z "$build" ]; then
+            if [ -n "$other" ]; then
+              fail "The build of $version is $other, but $TAG is on commit ${commit:0:7}. Something was merged in between: run Build installers again with version $version, then run Release again with $TAG."
+            fi
+            fail "There's no complete build of $version from commit ${commit:0:7}. Run Build installers with version $version first, then run Release again with $TAG."
+          fi
+          echo "Releasing build #$build ($version, commit $commit)"
+          { echo "VERSION=$version"; echo "COMMIT=$commit"; echo "BUILD=$build"; } >> "$GITHUB_ENV"
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
@@ -148,6 +172,40 @@ jobs:
           curl -sf "https://storage.googleapis.com/$BUCKET/desktop/updates/win/latest.yml?check=$GITHUB_RUN_ID" | grep -qx "version: $VERSION" \
             || { echo "::error::The update feed doesn't show version $VERSION."; exit 1; }
 
+      # Keeps your notes and adds a Downloads section below them. The section starts with a
+      # hidden marker, so a re-run replaces it instead of adding a second one. With no release
+      # page yet (run by hand after pushing a tag), it creates one with generated notes.
+      - name: Add the downloads to the release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          marker='<!-- downloads -->'
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
+              --title "Swyft Finance $VERSION" --generate-notes
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
+            | awk -v m="$marker" '$0 == m { exit } { print }' > notes.md
+          base="https://storage.googleapis.com/$BUCKET/desktop/v$VERSION"
+          name="Swyft-Finance-$VERSION"
+          {
+            echo
+            echo "$marker"
+            echo "### Downloads"
+            echo
+            echo "| File | SHA-256 |"
+            echo "| --- | --- |"
+            for entry in "$name-x64-Setup.exe|Windows 10/11 (x64)" "$name-arm64.dmg|macOS, Apple Silicon" "$name-x64.dmg|macOS, Intel"; do
+              file="${entry%%|*}"
+              echo "| [${entry#*|}]($base/$file) | \`$(curl -sf "$base/$file.sha256" | cut -d' ' -f1)\` |"
+            done
+            echo
+            echo "Installed Windows apps update themselves. The Windows installer isn't code-signed; on first run choose _More info → Run anyway_."
+          } >> notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+
       - name: Write the run summary
         if: always()
         shell: bash
@@ -157,19 +215,19 @@ jobs:
           {
             echo "## Release"
             echo
-            echo "Publishes a tested build from **Build installers**. It doesn't build or tag anything."
+            echo "Publishes a tested build when a GitHub release is published. It doesn't build or tag anything."
             echo
             if [ "$STATUS" = "success" ]; then
               base="https://storage.googleapis.com/$BUCKET/desktop/v$VERSION"
-              echo "**Released build #$BUILD as v$VERSION** (commit \`${COMMIT:0:7}\`)"
+              echo "**Released $TAG** from build #$BUILD (commit \`${COMMIT:0:7}\`)"
               echo
               echo "- Windows: [Swyft-Finance-$VERSION-x64-Setup.exe]($base/Swyft-Finance-$VERSION-x64-Setup.exe)"
               echo "- macOS Apple Silicon: [Swyft-Finance-$VERSION-arm64.dmg]($base/Swyft-Finance-$VERSION-arm64.dmg)"
               echo "- macOS Intel: [Swyft-Finance-$VERSION-x64.dmg]($base/Swyft-Finance-$VERSION-x64.dmg)"
-              echo "- Checksums: add \`.sha256\` to a link."
+              echo "- Release page: [$TAG]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG)"
               echo
               echo "Installed Windows apps offer the update at their next check (at start-up, then every 6 hours)."
             else
-              echo "Build #$BUILD wasn't released. The failed step says why. Installed apps still get the previous version, because the update feed is only changed at the very end. Fix the problem and run Release again with the same build; it carries on from where it stopped."
+              echo "$TAG wasn't released. The failed step says why. Installed apps still get the previous version, because the update feed is only changed at the end. Fix the problem, then run Release again by hand with $TAG (or use **Re-run jobs**); it carries on from where it stopped."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
