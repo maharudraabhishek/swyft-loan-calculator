@@ -37,5 +37,5 @@ Payment timing (`advance` or `arrears`) is a separate setting: advance = arrears
 
 - The brief's formulas and worked example, line by line (`brief-math-spec.test.ts`).
 - SPG's four HTML calculators, run unmodified over a grid of inputs (`spg-calculators-grid.test.ts`).
-- The official `test-cases.json` (`upstream-fixtures.test.ts`). 5 of its 8 cases fail on 10 of the 49 expected values, where the file disagrees with SPG's calculators and schedules. `fixture-disputes.test.ts` checks each one, and the main README goes through them under Known limitations.
+- The official `test-cases.json` (`upstream-fixtures.test.ts`). 5 of its 8 cases fail because their expected values contradict the brief's formulas. `fixture-disputes.test.ts` checks each one, and the main README explains them under Finance validation.
 - The lender CSV schedules, whole-dollar rounding, dates and domain rules.

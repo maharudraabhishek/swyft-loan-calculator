@@ -22,4 +22,4 @@ python scripts/run_local.py cloud        # compiled desktop against the deployed
 
 Closing the desktop window (or Ctrl+C) stops the API and the desktop. PostgreSQL keeps running in Docker with its data; `docker compose stop` stops it.
 
-`verify.ps1` stops at the first check that fails. Unit and fixture tests run last, and right now they only fail on the five official test cases (see Known limitations in the main README).
+`verify.ps1` stops at the first check that fails. Unit and fixture tests run last, and right now they only fail on the five official test cases (see Finance validation in the main README).

@@ -46,15 +46,15 @@ jobs:
         run: pnpm test:integration
       - name: Unit tests
         run: pnpm -r --filter '!@swyft/finance' run test
-      # Expected to fail. 5 of the 8 official test-cases.json cases disagree with SPG's
-      # calculators and schedules (see Known limitations in the README), so this step
+      # Expected to fail. 5 of the 8 official test-cases.json cases contradict the brief's
+      # formulas (see Finance validation in the README), so this step
       # fails and Vitest adds a red annotation for each of the five. That is expected:
       # continue-on-error lets the job pass. The next step is the real check. It fails
       # on any other finance failure, or if the differences in those five cases change.
       - name: Official fixtures (5 known failures, expected, allowed to pass)
         continue-on-error: true
         run: |
-          echo "::notice title=Official fixtures::5 of the 8 official test cases fail as expected (see Known limitations in the README). The red annotations from this step are expected and don't fail the job."
+          echo "::notice title=Official fixtures::5 of the 8 official test cases fail as expected (see Finance validation in the README). The red annotations from this step are expected and don't fail the job."
           pnpm --filter @swyft/finance exec vitest run tests/upstream-fixtures.test.ts
       - name: Finance tests (only the five documented official cases may differ)
         run: node scripts/check-finance.mjs

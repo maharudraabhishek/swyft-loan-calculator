@@ -1,7 +1,7 @@
 // Finance gate for CI. Runs the finance test suite and passes only when the result is
 // exactly the documented state: every test passes except the five disputed official
 // cases in tests/fixtures/upstream/test-cases.json, and each of those differs on exactly
-// the values explained in README.md (Known limitations). Any other failure fails the gate,
+// the values explained in README.md (Finance validation). Any other failure fails the gate,
 // and so does a disputed value that changes or starts to match (then update the README
 // and the list below together).
 //

@@ -10,7 +10,7 @@ The app is built with Electron and React. It talks to a small API on Google Clou
 
 ```mermaid
 flowchart LR
-  subgraph Desktop["Electron app (Windows)"]
+  subgraph Desktop["Electron app (Windows, macOS)"]
     R["Renderer<br/>React UI, sandboxed<br/>no network access"]
     P["Preload<br/>typed window.swyft bridge"]
     M["Main process<br/>session, safeStorage, API client,<br/>local quote preview"]
@@ -260,7 +260,7 @@ pnpm desktop:package:mac                     # macOS disk images, Apple Silicon 
 node scripts/check-finance.mjs               # finance tests, allowing only the five known official failures
 ```
 
-Installers are written to `apps/desktop/dist/`. `pnpm verify` runs every check. Right now it only fails on the five official test cases covered at the end of _Known limitations_.
+Installers are written to `apps/desktop/dist/`. `pnpm verify` runs every check. Right now it only fails on the five official test cases explained under _Finance validation_.
 
 Testing approach:
 
@@ -326,7 +326,19 @@ Because the installer is attached, the Release workflow knows the release was ma
 
 ## Finance validation
 
-The engine follows the brief's formulas with full-precision decimals and only rounds the payment and commission to the cent at the end. The tests behind everything below are in `packages/finance/tests`:
+**5 of the 8 official test cases fail, and that's expected.** In each of those five, the expected numbers in `test-cases.json` contradict the formulas in the brief itself. The engine follows the brief, so it can't match them. I haven't changed the test file to make them pass.
+
+| Case                        | Brief's formula (and the engine)     | `test-cases.json` expects                   | Why                                                                                                                                                                                                                                                            |
+| --------------------------- | ------------------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| westpac-basic               | $646.10 a month                      | $656.19                                     | These are the brief's own worked-example inputs, paid in advance. The brief says advance = arrears ÷ (1 + i): $650.68 ÷ 1.00708 = $646.10. $656.19 is the payment with the $495 fee added twice, and the expected interest and comparison rate follow from it. |
+| westpac-with-balloon        | $914.16 a month                      | $844.22                                     | The brief's balloon formula gives $914.16, and so does SPG's own calculator. No combination of the inputs I tried gets to $844.22.                                                                                                                             |
+| pepper-origination-financed | $35,846.08 financed                  | $35,845.85                                  | The brief's loading formula gives $35,846.08, and so does SPG's Pepper calculator.                                                                                                                                                                             |
+| pepper-all-fees-financed    | $36,362.53 financed, $805.95 a month | $36,352.85, $805.73                         | Both Pepper cases add exactly $655.85 to the NAF, although their commissions are different. The second value was copied from the first, not worked out.                                                                                                        |
+| autopay-daily-interest      | $147.11 first-payment interest       | $147.01, and $495.29 for the second payment | The brief says interest = balance × rate ÷ 365. $147.01 divides by 365.25 instead. $495.29 is copied from a real lender statement where the first payment failed, so the loan inputs can't produce it; the brief's method gives $639.16.                       |
+
+`packages/finance/tests/fixture-disputes.test.ts` runs SPG's own calculators and schedules against these numbers. Everything else matches, as below.
+
+The engine uses full-precision decimals and only rounds the payment and commission to the cent at the end. The tests behind everything below are in `packages/finance/tests`:
 
 - **Brief formulas and worked example:** all match. The brief prints the intermediate (1+i)^60 as 1.52699, which is a misprint (the exact value is 1.52730). You only get its final $650.68 with full precision.
 - **SPG's four HTML calculators, run unmodified:**
@@ -334,7 +346,7 @@ The engine follows the brief's formulas with full-precision decimals and only ro
   - Branded: every payment is identical.
   - Autopay: NAF, commission, principal and first interest are identical.
   - The other differences are covered under _Assumptions_.
-- **`test-cases.json`:** 3 of the 8 cases pass completely and 39 of the 49 expected values match. The other 10 values (in 5 cases) disagree with SPG's calculators or lender schedules; `fixture-disputes.test.ts` has the checks and the end of _Known limitations_ goes through them. I haven't edited any fixture.
+- **`test-cases.json`:** the other 3 cases match completely. The 5 that don't are explained above.
 - **Lender schedules in the brief:**
   - Traditional: the CSV payments do not repay their own loans ($538.15 remains after 60 payments); the engine and SPG's calculator agree.
   - Pepper: within 1–9¢ (the 0.4 loading factor is reverse-engineered).
@@ -371,11 +383,5 @@ The engine follows the brief's formulas with full-precision decimals and only ro
 - If the OS offers no secure storage, the session is kept in memory only, and the app says so.
 - NSW business-day dates cover 2025–2032.
 - Sign-in rate limits are per Cloud Run instance (at most 3); there is no Cloud Armor.
-- 1.1.0 shipped without the Intel Mac image because of a mistake in the build script. That's fixed, and the next release will include it.
 - The Windows installer isn't code-signed. The Mac image is only ad-hoc signed and isn't notarised (I don't have an Apple Developer ID), so the first time you open it macOS needs _System Settings → Privacy & Security → Open Anyway_. I haven't tested it on a Mac yet. Automatic updates are Windows-only, and 1.0.0 has no updater, so anyone on 1.0.0 has to install 1.1.0 manually once.
-- **5 of the 8 official test cases fail.** `test-cases.json` has 49 expected values across its 8 cases. 3 cases match completely and the other 5 are off on 10 values. I checked each of those 10 against SPG's HTML calculators (run unmodified in `fixture-disputes.test.ts`) and the lender CSV schedules, and I've written up what I found for each case below. I've left the fixtures as they are, so `upstream-fixtures.test.ts` still fails on these five.
-  - **westpac-basic** (3 values). SPG's Traditional calculator shows $646.10 a month, a 10.25% comparison rate and $7,051.27 interest, which is what the engine gives too. The expected $656.19 turns out to be the payment on $32,209.80, which is the total financed stated in the same case ($31,714.80) with the $495 fee added a second time. The expected interest of $7,656.60 is 60 × $656.19 − $31,714.80, so it's off for the same reason. The expected 9.23% comparison rate doesn't match either payment. Worked out on the NAF (the basis `test-cases.json` says to use), $646.10 gives 10.25% and $656.19 would give 10.94%.
-  - **westpac-with-balloon** (2 values). For these inputs SPG's calculator shows $914.16 and 9.63%, the same as the engine. I tried the obvious variations (advance or arrears, fee financed or not, with or without commission, balloon as $13,500 or as 30% of the total financed) and none of them gives $844.22. Even $844.22 wouldn't give the expected 8.78%; on the NAF it comes to 6.97%.
-  - **pepper-origination-financed** (1 value). SPG's Pepper calculator shows $35,846.08 financed, the same as the engine; the file expects $35,845.85. The $794.50 monthly payment matches.
-  - **pepper-all-fees-financed** (2 values). SPG's calculator shows $36,362.53 financed and $805.95 a month, the same as the engine; the file expects $36,352.85 and $805.73. $805.73 is simply the payment on $36,352.85, so the payment is only off because the amount financed is.
-  - **autopay-daily-interest** (2 values). The monthly payment ($1,767.42), day counts and dates all match. For the first payment's interest, SPG's calculator shows $147.11 using actual/365, the same as the engine. The file's $147.01 comes from dividing by 365.25, which is what one of the real lender schedules does; the brief, `lender-configs.json`, SPG's calculator and the other Autopay schedule all divide by 365. The expected second-payment interest of $495.29 is row 2 of that same schedule, where payment 1 failed and payment 2 starts from $84,219.20 instead of the $84,084.45 left after payment 1. That can't be worked out from the loan inputs; the engine gives $639.16.
+- 5 of the 8 official finance test cases fail because their expected values contradict the brief's formulas. See _Finance validation_.
