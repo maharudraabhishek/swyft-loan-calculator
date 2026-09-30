@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Release workflow: build on `master` for testing (installers uploaded to `desktop/builds/<run number>/` with links on the run page), then release that exact build as a version without rebuilding. Each run's page explains the workflow and lists its download links and checksums.
+
 ### Fixed
 
 - The macOS build now produces the Intel disk image as well as the Apple Silicon one (1.1.0 shipped Apple Silicon only).
