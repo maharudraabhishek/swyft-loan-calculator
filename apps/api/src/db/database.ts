@@ -17,6 +17,7 @@ export interface Principal {
   readonly accessTokenHash: Buffer;
 }
 
+/** Connection settings for the runtime role's pool (host may be a Cloud SQL socket directory). */
 export interface DatabaseOptions {
   readonly host: string;
   readonly port: number;

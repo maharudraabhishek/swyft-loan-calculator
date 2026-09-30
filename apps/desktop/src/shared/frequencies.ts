@@ -45,6 +45,7 @@ export function monthlyFeeNote(monthlyFee: string): string {
     : `(incl. ${formatMoney(monthlyFee)} monthly fee)`;
 }
 
+/** One frequency's repayment, ready to display. */
 export interface RepaymentPart {
   readonly frequency: PaymentFrequency;
   readonly amount: string;
@@ -52,6 +53,7 @@ export interface RepaymentPart {
   readonly text: string;
 }
 
+/** The figures a repayment string is built from. */
 export interface RepaymentSource {
   readonly grossMonthlyPayment: string;
   readonly monthlyFee: string;

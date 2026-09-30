@@ -43,6 +43,7 @@ function Repayments({
   );
 }
 
+/** Commission as shown in the log and comparison: dollars, plus the rate when there is one. */
 export function commissionDisplay(quote: QuoteDto): string {
   if (quote.commission === null) return '—';
   return quote.commissionRate === null

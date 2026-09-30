@@ -1,4 +1,5 @@
 import { Decimal } from './decimal.js';
+import { amortizeDaily, amortizeMonthly } from './amortization.js';
 import { createDailyRepaymentPlan } from './daily.js';
 import { calculateQuote } from './quote.js';
 import type { AutopayInput, QuoteInput, ScheduleRow } from './types.js';
@@ -6,12 +7,17 @@ import { Money } from './value-objects.js';
 
 const ZERO = new Decimal(0);
 
+/**
+ * Monthly lenders. Which balance and rate the schedule runs on depends on the model:
+ * - Traditional (capitalised): total financed (NAF + commission) at the base rate.
+ * - Branded (overs): NAF at the contract rate; the commission is not added to principal.
+ * - Pepper (loaded): NAF at the solved customer rate, because the commission is serviced
+ *   by the rate margin rather than added to the balance.
+ */
 function makeMonthlySchedule(
   input: Exclude<QuoteInput, AutopayInput>,
   quote = calculateQuote(input),
 ): readonly ScheduleRow[] {
-  // Pepper's loaded principal determines the quote payment, while its customer
-  // amortization starts at NAF and accrues at the solved customer rate.
   const annualRate =
     input.model === 'capitalised'
       ? input.baseRate
@@ -19,58 +25,33 @@ function makeMonthlySchedule(
         ? input.contractRate
         : quote.effectiveAnnualRate;
   if (!annualRate) throw new RangeError('Pepper customer rate is missing');
-  const monthlyRate = annualRate.decimal().div(12);
-  const timing =
-    input.timing ?? (input.model === 'branded' ? 'arrears' : 'advance');
-  const payment = quote.monthlyPayment.decimal();
-  const fee = input.monthlyFee?.decimal() ?? ZERO;
-  const balloon = input.balloon?.decimal() ?? ZERO;
-  let balance =
-    input.model === 'pepper'
-      ? quote.netAmountFinanced.decimal()
-      : quote.amountFinanced.decimal();
-  const rows: ScheduleRow[] = [];
-
-  for (let period = 1; period <= input.termMonths; period += 1) {
-    const opening = balance;
-    // Advance instalment one is paid at settlement and therefore accrues no prior interest.
-    const interest = Money.from(
-      period === 1 && timing === 'advance' ? ZERO : opening.mul(monthlyRate),
-    )
-      .roundCents()
-      .decimal();
-    // The balloon is due at month n; the last advance payment is at n - 1.
-    // Retain its discounted value at each payment, including the final cent adjustment.
-    const residual = balloon.div(
-      new Decimal(1)
-        .plus(monthlyRate)
-        .pow(input.termMonths - period + (timing === 'advance' ? 1 : 0)),
-    );
-    let principal = payment.minus(interest);
-    let actualPayment = payment;
-    if (
-      period === input.termMonths ||
-      principal.greaterThan(opening.minus(residual))
-    ) {
-      // Never collect more principal than remains, even when cent PMTs pay off early.
-      principal = opening.minus(residual);
-      actualPayment = principal.plus(interest);
-    }
-    balance = opening.minus(principal);
-    rows.push({
-      period,
-      openingBalance: Money.from(opening).roundCents(),
-      payment: Money.from(actualPayment).roundCents(),
-      interest: Money.from(interest),
-      principal: Money.from(principal).roundCents(),
-      fee: Money.from(fee).roundCents(),
-      closingBalance: Money.from(balance).roundCents(),
-    });
-    if (balance.isZero()) break;
-  }
-  return rows;
+  const fee = Money.from(input.monthlyFee?.decimal() ?? ZERO).roundCents();
+  const rows = amortizeMonthly({
+    startingBalance:
+      input.model === 'pepper'
+        ? quote.netAmountFinanced.decimal()
+        : quote.amountFinanced.decimal(),
+    monthlyRate: annualRate.decimal().div(12),
+    termMonths: input.termMonths,
+    payment: quote.monthlyPayment.decimal(),
+    balloon: input.balloon?.decimal() ?? ZERO,
+    timing: input.timing ?? (input.model === 'branded' ? 'arrears' : 'advance'),
+  });
+  return rows.map((row) => ({
+    period: row.period,
+    openingBalance: Money.from(row.opening).roundCents(),
+    payment: Money.from(row.payment).roundCents(),
+    interest: Money.from(row.interest),
+    principal: Money.from(row.principal).roundCents(),
+    fee,
+    closingBalance: Money.from(row.closing).roundCents(),
+  }));
 }
 
+/**
+ * Daily-interest lenders (Autopay): actual payment dates, actual/365 interest, settlement
+ * day counted in the first period, and a sliding fee on the first instalment.
+ */
 function makeDailySchedule(
   input: AutopayInput,
   quote = calculateQuote(input),
@@ -86,34 +67,37 @@ function makeDailySchedule(
     quote.effectiveAnnualRate.decimal(),
     balloon,
   );
-  let balance = quote.amountFinanced.decimal();
-  const rows: ScheduleRow[] = [];
-
-  for (const { period, dueDate, days } of periods) {
-    const opening = balance;
-    const interest = opening.mul(dailyRate).mul(days);
-    // Use the solved unrounded payment for every period, including the final one.
-    // A balloon is a maturity target, not an intermediate minimum balance.
-    const principal = payment.minus(interest);
-    balance = opening.minus(principal);
-    rows.push({
-      period,
-      dueDate,
-      days,
-      openingBalance: Money.from(opening).roundCents(),
-      payment: Money.from(payment).roundCents(),
-      interest: Money.from(interest).roundCents(),
-      principal: Money.from(principal).roundCents(),
-      fee: Money.from(
-        monthlyFee.plus(period === 1 ? slidingFee : ZERO),
-      ).roundCents(),
-      closingBalance: Money.from(balance).roundCents(),
-    });
-  }
-  return rows;
+  const dollarUp = input.paymentRounding === 'dollar-up';
+  const rows = amortizeDaily({
+    periods,
+    dailyRate,
+    startingBalance: quote.amountFinanced.decimal(),
+    // Cent rounding charges the solved payment every period (it lands on the balloon at
+    // maturity); a rounded-up payment needs its final instalment reduced instead.
+    payment: dollarUp ? quote.monthlyPayment.decimal() : payment,
+    balloon,
+    settleFinalInstalment: dollarUp,
+  });
+  return rows.map((row, index) => ({
+    period: row.period,
+    dueDate: periods[index]?.dueDate ?? '',
+    days: periods[index]?.days ?? 0,
+    openingBalance: Money.from(row.opening).roundCents(),
+    payment: Money.from(row.payment).roundCents(),
+    interest: Money.from(row.interest).roundCents(),
+    principal: Money.from(row.principal).roundCents(),
+    fee: Money.from(
+      monthlyFee.plus(row.period === 1 ? slidingFee : ZERO),
+    ).roundCents(),
+    closingBalance: Money.from(row.closing).roundCents(),
+  }));
 }
 
-/** Produce a deterministic preview schedule from domain inputs; never reuse client-calculated values. */
+/**
+ * The repayment schedule for a quote, generated from the domain inputs (never from
+ * figures a client calculated). Payments exclude the monthly and sliding fees, which are
+ * shown in their own column.
+ */
 export function generateSchedule(input: QuoteInput): readonly ScheduleRow[] {
   return input.model === 'autopay'
     ? makeDailySchedule(input)

@@ -14,9 +14,11 @@ import { z } from 'zod';
 const moneyPattern = /^(?:0|[1-9]\d{0,8})(?:\.\d{1,2})?$/;
 const fractionPattern = /^(?:0(?:\.\d{1,10})?|1(?:\.0{1,10})?)$/;
 
+/** Dollar amount as a string: 0 to 999,999,999.99, at most two decimals. */
 export const moneySchema = z
   .string()
   .regex(moneyPattern, 'Use a dollar amount such as 1234.50');
+/** A {@link moneySchema} amount greater than zero. */
 export const positiveMoneySchema = moneySchema.refine(
   (value) => Number(value) > 0,
   'Must be greater than zero',
@@ -25,7 +27,9 @@ export const positiveMoneySchema = moneySchema.refine(
 export const fractionSchema = z
   .string()
   .regex(fractionPattern, 'Use a decimal fraction from 0 to 1, e.g. 0.085');
+/** Record identifiers are UUIDs. */
 export const uuidSchema = z.uuid();
+/** A real calendar date as `YYYY-MM-DD` (2026-02-30 is rejected). */
 export const isoDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -56,18 +60,22 @@ const httpsUrlSchema = z
   .max(240)
   .refine((value) => !/\s/.test(value));
 
+/** The four commission models in the brief (see packages/finance/README.md, "Commission models"). */
 export const commissionModelSchema = z.enum([
   'capitalised',
   'overs',
   'loaded',
   'daily_interest',
 ]);
+/** First instalment at settlement (`advance`) or one period later (`arrears`). */
 export const paymentTimingSchema = z.enum(['advance', 'arrears']);
+/** Monthly compounding or daily interest over actual days. */
 export const interestMethodSchema = z.enum(['monthly', 'daily']);
 
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
+/** Machine-readable error codes; the HTTP status carries the same meaning. */
 export const apiErrorCodeSchema = z.enum([
   'BAD_REQUEST',
   'VALIDATION_FAILED',
@@ -82,6 +90,10 @@ export const apiErrorCodeSchema = z.enum([
 ]);
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 
+/**
+ * Every error response: a code, a safe message, the request ID for support, and
+ * optional per-field validation messages keyed by request field.
+ */
 export const apiErrorSchema = z.strictObject({
   error: z.strictObject({
     code: apiErrorCodeSchema,
@@ -124,6 +136,7 @@ const base64UrlSchema = (min: number, max: number) =>
     .max(max)
     .regex(/^[A-Za-z0-9_-]+$/);
 
+/** Query for `GET /v1/auth/login`: the app's loopback address, `state` and PKCE S256 challenge. */
 export const loginStartQuerySchema = z.strictObject({
   redirect_uri: loopbackRedirectSchema,
   state: base64UrlSchema(22, 128),
@@ -131,6 +144,10 @@ export const loginStartQuerySchema = z.strictObject({
   code_challenge_method: z.literal('S256'),
 });
 
+/**
+ * Body for `POST /v1/auth/token`: exchange the single-use sign-in code (with the PKCE
+ * verifier) or a refresh token for a new token pair.
+ */
 export const tokenRequestSchema = z.discriminatedUnion('grantType', [
   z.strictObject({
     grantType: z.literal('authorization_code'),
@@ -145,10 +162,12 @@ export const tokenRequestSchema = z.discriminatedUnion('grantType', [
 ]);
 export type TokenRequestDto = z.infer<typeof tokenRequestSchema>;
 
+/** Body for `POST /v1/auth/logout`: the refresh token of the session to revoke. */
 export const logoutRequestSchema = z.strictObject({
   refreshToken: base64UrlSchema(20, 128),
 });
 
+/** The signed-in user as the API describes them. */
 export const userSchema = z.strictObject({
   id: uuidSchema,
   email: z.string(),
@@ -156,6 +175,7 @@ export const userSchema = z.strictObject({
 });
 export type UserDto = z.infer<typeof userSchema>;
 
+/** A new token pair. The access token is short-lived; the refresh token rotates on use. */
 export const tokenResponseSchema = z.strictObject({
   accessToken: z.string(),
   accessTokenExpiresAt: z.iso.datetime({ offset: true }),
@@ -168,9 +188,11 @@ export type TokenResponseDto = z.infer<typeof tokenResponseSchema>;
 // ---------------------------------------------------------------------------
 // Deals and quotes
 // ---------------------------------------------------------------------------
+/** Body for creating or renaming a deal. */
 export const dealWriteSchema = z.strictObject({ name: nameSchema(200) });
 export type DealWriteDto = z.infer<typeof dealWriteSchema>;
 
+/** A deal with its quote log ID and how many quotes the log holds. */
 export const dealSchema = z.strictObject({
   id: uuidSchema,
   name: z.string(),
@@ -181,6 +203,7 @@ export const dealSchema = z.strictObject({
 });
 export type DealDto = z.infer<typeof dealSchema>;
 
+/** Keyset pagination: page size (1–100, default 50) and an opaque cursor. */
 export const listQuerySchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   cursor: z
@@ -190,6 +213,7 @@ export const listQuerySchema = z.strictObject({
     .optional(),
 });
 
+/** Lender fee types a fee signature can carry. */
 export const lenderFeeKindSchema = z.enum([
   'establishment',
   'ppsrRegistration',
@@ -197,6 +221,10 @@ export const lenderFeeKindSchema = z.enum([
   'privateSale',
 ]);
 
+/**
+ * What a broker chooses for one quote. It never carries calculated amounts: the API
+ * recalculates every figure from these choices and the stored fee signature.
+ */
 export const quoteCreateSchema = z.strictObject({
   feeSignatureId: uuidSchema,
   assetDescription: textSchema(200).default(''),
@@ -223,8 +251,13 @@ export const quoteCreateSchema = z.strictObject({
 export type QuoteCreateDto = z.input<typeof quoteCreateSchema>;
 export type QuoteCreateParsed = z.output<typeof quoteCreateSchema>;
 
+/** Only a quote's notes can change; its figures are immutable. */
 export const quoteUpdateSchema = z.strictObject({ notes: textSchema(2000) });
 
+/**
+ * A saved quote: the broker's choices plus the server-calculated figures (money to the
+ * cent, rates as decimal fractions).
+ */
 export const quoteSchema = z.strictObject({
   id: uuidSchema,
   dealId: uuidSchema,
@@ -264,10 +297,12 @@ export type QuoteDto = z.infer<typeof quoteSchema>;
 // ---------------------------------------------------------------------------
 // Lenders and fee signatures
 // ---------------------------------------------------------------------------
+/** Body for adding the broker's own lender (website must be https). */
 export const lenderCreateSchema = z.strictObject({
   name: nameSchema(120),
   websiteUrl: httpsUrlSchema.nullable().default(null),
 });
+/** Partial update of the broker's own lender; at least one field. */
 export const lenderUpdateSchema = z
   .strictObject({
     name: nameSchema(120).optional(),
@@ -275,6 +310,7 @@ export const lenderUpdateSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, 'Nothing to update');
 
+/** A built-in or the broker's own lender; logos are fetched separately. */
 export const lenderSchema = z.strictObject({
   id: uuidSchema,
   name: z.string(),
@@ -292,6 +328,10 @@ const lenderFeeSchema = z.strictObject({
   financed: z.boolean(),
 });
 
+/**
+ * A fee signature as the broker defines it (create or replace). Model parameters must
+ * match the commission model; the API checks that and answers with field messages.
+ */
 export const feeSignatureDefinitionSchema = z.strictObject({
   lenderId: uuidSchema,
   name: nameSchema(120),
@@ -307,6 +347,12 @@ export const feeSignatureDefinitionSchema = z.strictObject({
   monthlyFee: moneySchema.default('0'),
   slidingFee: moneySchema.default('0'),
   maxBrokerOrigination: moneySchema.nullable().default(null),
+  /**
+   * Lender rounds the repayment up to the next whole dollar. Optional so older app
+   * versions (which never send it) keep working: omitted on create means off, omitted on
+   * update keeps the stored value.
+   */
+  roundPaymentUpToDollar: z.boolean().optional(),
   fees: z
     .strictObject({
       establishment: lenderFeeSchema
@@ -322,16 +368,22 @@ export type FeeSignatureDefinitionParsed = z.output<
   typeof feeSignatureDefinitionSchema
 >;
 
+/** Create a fee signature by copying an existing one (optionally renamed). */
 export const feeSignatureCopySchema = z.strictObject({
   copyFromId: uuidSchema,
   name: nameSchema(120).optional(),
 });
 
+/** Body for `POST /v1/fee-signatures`: a copy request or a full definition. */
 export const feeSignatureCreateSchema = z.union([
   feeSignatureCopySchema,
   feeSignatureDefinitionSchema,
 ]);
 
+/**
+ * A lender product ("fee signature"): its fees, commission model, timing and version.
+ * Built-in signatures are read-only (`isPreset`); custom ones link to their source.
+ */
 export const feeSignatureSchema = z.strictObject({
   id: uuidSchema,
   lenderId: uuidSchema,
@@ -352,6 +404,12 @@ export const feeSignatureSchema = z.strictObject({
   monthlyFee: z.string(),
   slidingFee: z.string(),
   maxBrokerOrigination: z.string().nullable(),
+  /**
+   * Present (and `true`) only when the lender rounds repayments up to a whole dollar.
+   * The API omits it otherwise, because app versions that predate the field parse
+   * responses strictly and would reject an unknown key.
+   */
+  roundPaymentUpToDollar: z.boolean().optional(),
   fees: z.strictObject({
     establishment: z
       .strictObject({

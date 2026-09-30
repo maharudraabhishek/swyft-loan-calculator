@@ -1,0 +1,132 @@
+# A version tag (vX.Y.Z) builds the Windows installer and the macOS disk images, then
+# uploads them with SHA-256 checksums straight from each runner to the release bucket in
+# Google Cloud Storage (gs://<bucket>/desktop/<tag>/). The Windows job also publishes the
+# automatic-update feed (gs://<bucket>/desktop/updates/win/). No GitHub artifact storage
+# is used. The runner signs in to Google Cloud with GitHub's short-lived OIDC
+# token (Workload Identity Federation), so no key is stored in GitHub.
+#
+# Running it by hand (Actions → Release → Run workflow) builds without uploading.
+#
+# Repository variables (Settings → Secrets and variables → Actions → Variables):
+#   GCP_WORKLOAD_IDENTITY_PROVIDER  projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+#   GCP_RELEASE_SERVICE_ACCOUNT     service account allowed to create objects in the bucket
+#   GCP_RELEASE_BUCKET              bucket name, without gs://
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2025
+            script: desktop:package:win
+            pattern: '*.exe'
+          - name: macOS
+            os: macos-15
+            script: desktop:package:mac
+            pattern: '*.dmg'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # lets google-github-actions/auth request the OIDC token
+    env:
+      UPLOAD: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0 (version from packageManager)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the tag matches the app version
+        if: env.UPLOAD == 'true'
+        shell: bash
+        run: |
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match apps/desktop/package.json version $version"
+            exit 1
+          fi
+
+      # Builds against the public API origin in apps/desktop/.env.production.
+      - run: pnpm run ${{ matrix.script }}
+
+      - name: Collect installers and SHA-256 checksums
+        shell: bash
+        run: |
+          mkdir release
+          cp apps/desktop/dist/${{ matrix.pattern }} release/
+          cd release
+          for file in *; do
+            if command -v sha256sum > /dev/null; then
+              sha256sum "$file" > "$file.sha256"
+            else
+              shasum -a 256 "$file" > "$file.sha256"
+            fi
+          done
+          ls -l
+          cat ./*.sha256
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        if: env.UPLOAD == 'true'
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_RELEASE_SERVICE_ACCOUNT }}
+      # The service account can create objects but not replace or delete them, so a
+      # published installer can never be overwritten. The one exception is the update
+      # feed's latest.yml, which each release replaces.
+      - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3.0.0
+        if: env.UPLOAD == 'true'
+        with:
+          path: release
+          destination: ${{ vars.GCP_RELEASE_BUCKET }}/desktop/${{ github.ref_name }}
+          parent: false
+          gzip: false
+          process_gcloudignore: false
+
+      # Automatic updates (Windows): installer and blockmap first, latest.yml last, so an
+      # app never reads a latest.yml whose installer is not there yet.
+      - name: Collect the update feed
+        if: env.UPLOAD == 'true' && matrix.name == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p feed/files feed/manifest
+          cp apps/desktop/dist/*.exe apps/desktop/dist/*.exe.blockmap feed/files/
+          cp apps/desktop/dist/latest.yml feed/manifest/
+          grep -q "^version: ${GITHUB_REF_NAME#v}$" feed/manifest/latest.yml
+          cat feed/manifest/latest.yml
+      - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3.0.0
+        if: env.UPLOAD == 'true' && matrix.name == 'Windows'
+        with:
+          path: feed/files
+          destination: ${{ vars.GCP_RELEASE_BUCKET }}/desktop/updates/win
+          parent: false
+          gzip: false
+          process_gcloudignore: false
+      - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3.0.0
+        if: env.UPLOAD == 'true' && matrix.name == 'Windows'
+        with:
+          path: feed/manifest
+          destination: ${{ vars.GCP_RELEASE_BUCKET }}/desktop/updates/win
+          parent: false
+          gzip: false
+          process_gcloudignore: false
+          # Public objects are cached for an hour by default; the manifest must not be.
+          headers: |-
+            cache-control: no-cache

@@ -1,7 +1,7 @@
 {
   "name": "@swyft/desktop",
   "productName": "Swyft Finance",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
@@ -12,6 +12,7 @@
     "test": "vitest run",
     "build": "electron-vite build",
     "package:win": "electron-vite build && electron-builder --win nsis --publish never",
+    "package:mac": "electron-vite build && electron-builder --mac dmg --publish never",
     "smoke:packaged": "node scripts/smoke-packaged.mjs",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
@@ -20,6 +21,7 @@
     "@swyft/finance": "workspace:*",
     "@swyft/quoting": "workspace:*",
     "decimal.js": "10.6.0",
+    "electron-updater": "6.8.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "zod": "4.6.5"

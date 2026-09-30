@@ -301,7 +301,7 @@ try {
 
   // Quote log
   await app.eval(
-    `[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.startsWith('Saved quotes')).click(); return true;`,
+    `[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.startsWith('Quote log')).click(); return true;`,
   );
   await app.waitFor(
     `document.querySelectorAll('table.quote-log tbody tr').length === 3`,
@@ -383,9 +383,9 @@ try {
 
   // Delete one quote
   await app.eval(
-    `[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.startsWith('Saved quotes')).click(); return true;`,
+    `[...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.startsWith('Quote log')).click(); return true;`,
   );
-  await app.eval(`click('Quote log'); return true;`);
+  await app.eval(`click('Table'); return true;`);
   await app.waitFor(`button('Delete quote Branded — Dealer')`, 'delete button');
   await app.eval(`click('Delete quote Branded — Dealer'); return true;`);
   await app.waitFor(`dialog()`, 'confirm dialog');
@@ -415,7 +415,7 @@ try {
     `[...document.querySelectorAll('.main-nav button')].find((b) => b.textContent === 'Calculator').click(); [...document.querySelectorAll('.deal-item')].find((b) => b.textContent.includes(${JSON.stringify(dealName)})).click(); return true;`,
   );
   await app.eval(
-    `await new Promise((r) => setTimeout(r, 300)); [...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.startsWith('Saved quotes')).click(); return true;`,
+    `await new Promise((r) => setTimeout(r, 300)); [...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.startsWith('Quote log')).click(); return true;`,
   );
   await app.waitFor(
     `document.querySelectorAll('table.quote-log tbody tr').length === 2`,
@@ -457,7 +457,7 @@ try {
     `[...document.querySelectorAll('.deal-item')].find((b) => b.textContent.includes(${JSON.stringify(dealName)})).click(); return true;`,
   );
   await app.eval(
-    `await new Promise((r) => setTimeout(r, 300)); [...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.startsWith('Saved quotes')).click(); return true;`,
+    `await new Promise((r) => setTimeout(r, 300)); [...document.querySelectorAll('[role=tab]')].find((t) => t.textContent.startsWith('Quote log')).click(); return true;`,
   );
   await app.waitFor(
     `document.querySelectorAll('table.quote-log tbody tr').length === 2`,

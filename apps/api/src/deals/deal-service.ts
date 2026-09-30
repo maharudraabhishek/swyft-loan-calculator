@@ -40,6 +40,7 @@ import {
 
 const uniqueViolation = '23505';
 
+/** Result of saving a quote: the stored quote and whether this was an idempotent replay. */
 export interface SavedQuote {
   readonly quote: QuoteDto;
   /** True when an identical earlier request with the same key is being replayed. */

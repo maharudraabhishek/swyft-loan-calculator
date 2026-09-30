@@ -260,7 +260,7 @@ describe('real-stack broker workflow', () => {
   });
 
   it('edits a note, compares, exports to the clipboard and deletes a quote', async () => {
-    fireEvent.click(screen.getByRole('tab', { name: /Saved quotes/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Quote log/ }));
     await screen.findByRole(
       'button',
       { name: 'Edit notes for Westpac — Dealer' },
@@ -296,8 +296,8 @@ describe('real-stack broker workflow', () => {
     expect(clipboard?.text).toContain('Finance Amount: $ 30,000.00');
     expect(clipboard?.text).not.toContain('Commissions'); // hidden by default
 
-    fireEvent.click(screen.getByRole('tab', { name: /Saved quotes/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Quote log' }));
+    fireEvent.click(screen.getByRole('tab', { name: /Quote log/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }));
     fireEvent.click(
       await screen.findByRole(
         'button',
@@ -421,7 +421,7 @@ describe('real-stack broker workflow', () => {
       await screen.findByRole('button', { name: /Integration — Ranger/ }, slow),
     );
     fireEvent.click(
-      await screen.findByRole('tab', { name: /Saved quotes/ }, slow),
+      await screen.findByRole('tab', { name: /Quote log/ }, slow),
     );
     fireEvent.click(
       await screen.findByRole('button', { name: 'Clear all quotes' }, slow),

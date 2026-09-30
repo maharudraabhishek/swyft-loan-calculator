@@ -9,6 +9,7 @@ import { generateSecret, hashSecret, pkceChallenge } from './tokens.js';
 
 const seconds = (value: number) => `${value} seconds`;
 
+/** A started sign-in: the attempt, its browser-binding secret and where to send the browser. */
 export interface LoginStart {
   readonly attemptId: string;
   /** Goes only into the HttpOnly browser cookie; the database keeps its hash. */
@@ -16,12 +17,14 @@ export interface LoginStart {
   readonly authorizationUrl: string;
 }
 
+/** What the OAuth callback does next. */
 export type LoginCompletion =
   /** Redirect the browser to the desktop loopback with a one-time code. */
   | { readonly kind: 'redirect'; readonly location: string }
   /** No valid attempt for this browser; show a page, nowhere safe to redirect. */
   | { readonly kind: 'expired' };
 
+/** A refresh either rotates to a new token pair or is rejected (expired, revoked or replayed). */
 export type RefreshOutcome =
   | { readonly kind: 'rotated'; readonly tokens: TokenResponseDto }
   | { readonly kind: 'rejected' };

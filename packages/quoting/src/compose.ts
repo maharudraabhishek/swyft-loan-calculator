@@ -27,6 +27,10 @@ export interface ResolvedFees {
   readonly monthlyFee: Money;
 }
 
+/**
+ * A quote ready for the engine: the engine input plus the fee split and the rates that
+ * were actually used (defaults applied), which are stored with a saved quote.
+ */
 export interface ComposedQuote {
   readonly input: QuoteInput;
   readonly fees: ResolvedFees;
@@ -34,6 +38,7 @@ export interface ComposedQuote {
   readonly contractRate?: AnnualRate;
 }
 
+/** A composed quote together with the engine result. */
 export interface CalculatedQuote extends ComposedQuote {
   readonly result: QuoteResult;
 }
@@ -136,6 +141,11 @@ export function composeQuote(
     upfrontFees: fees.upfrontFees,
     financeAmount: request.financeAmount,
     financedFees: fees.financedFees,
+    // Only whole-dollar lenders carry the option, so cent quotes (and their stored
+    // calculation snapshots) are exactly as before.
+    ...(signature.roundPaymentUpToDollar === true && {
+      paymentRounding: 'dollar-up' as const,
+    }),
   };
   if (signature.commissionModel !== 'overs' && request.contractRate)
     throw new QuoteCompositionError(

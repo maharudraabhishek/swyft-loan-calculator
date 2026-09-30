@@ -45,7 +45,7 @@ export function ClientEmail({
   if (quotes.length === 0)
     return (
       <p className="empty-state">
-        Tick at least one saved quote under <strong>Saved quotes</strong> to
+        Tick at least one saved quote under <strong>Quote log</strong> to
         include it in the client email.
       </p>
     );

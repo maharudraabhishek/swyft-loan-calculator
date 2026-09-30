@@ -45,6 +45,12 @@ describe('transport mapping', () => {
     expect(signature.fees.establishment?.maxAmount?.toFixed(2)).toBe('550.00');
     expect(signature.defaultCommissionRate).toBeUndefined();
     expect('baseCommission' in signature).toBe(false);
+    // An absent flag (older API versions omit it) means cent rounding.
+    expect('roundPaymentUpToDollar' in signature).toBe(false);
+    expect(
+      feeSignatureFromDto({ ...autopay, roundPaymentUpToDollar: true })
+        .roundPaymentUpToDollar,
+    ).toBe(true);
   });
 
   it('maps a parsed request and drops unset fee-financing overrides', () => {

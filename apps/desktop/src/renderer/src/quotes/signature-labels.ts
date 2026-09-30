@@ -33,6 +33,7 @@ export function paymentTimingLabel(item: {
     : timingLabels[item.paymentTiming];
 }
 
+/** Broker-facing names of the lender fee types. */
 export const feeLabels = {
   establishment: 'Lender fee',
   ppsrRegistration: 'PPSR registration',
@@ -40,7 +41,9 @@ export const feeLabels = {
   privateSale: 'Private sale fee',
 } as const;
 
+/** A lender fee type (key of {@link feeLabels}). */
 export type LenderFeeKind = keyof typeof feeLabels;
+/** Fee types in display order. */
 export const lenderFeeKinds = Object.keys(feeLabels) as LenderFeeKind[];
 
 /** "Westpac — Dealer" for a fee signature or a saved quote. */
@@ -72,6 +75,8 @@ export function feeSummary(signature: FeeSignatureDto): string {
   );
   if (Number(signature.slidingFee) > 0)
     parts.push(`${formatMoney(signature.slidingFee)} first-payment fee`);
+  if (signature.roundPaymentUpToDollar === true)
+    parts.push('repayments rounded up to whole dollars');
   return parts.join(' · ');
 }
 

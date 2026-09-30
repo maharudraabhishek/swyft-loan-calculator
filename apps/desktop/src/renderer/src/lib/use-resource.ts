@@ -11,6 +11,7 @@ export type Resource<T> =
   | { readonly status: 'ready'; readonly data: T }
   | { readonly status: 'error'; readonly data?: T; readonly error: ApiFailure };
 
+/** Server data plus the actions a screen needs to keep it current. */
 export interface ResourceHandle<T> {
   readonly resource: Resource<T>;
   readonly reload: () => void;

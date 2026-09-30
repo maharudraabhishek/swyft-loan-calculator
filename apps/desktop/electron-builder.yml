@@ -19,7 +19,25 @@ win:
       arch:
         - x64
   artifactName: Swyft-Finance-${version}-${arch}-Setup.${ext}
+  # Automatic updates (Windows only): the installed app reads latest.yml from this public
+  # folder. The release workflow uploads the installer, its blockmap and latest.yml there.
+  publish:
+    provider: generic
+    url: https://storage.googleapis.com/swyft-stage2-releases/desktop/updates/win
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+# macOS: no Apple Developer ID yet, so the app is ad-hoc signed ('-'); Apple Silicon
+# refuses to open an unsigned bundle. Hardened runtime is only needed for notarisation
+# and, with an ad-hoc signature, would reject Electron's own signed frameworks.
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.finance
+  identity: '-'
+  hardenedRuntime: false
+  artifactName: Swyft-Finance-${version}-${arch}.${ext}

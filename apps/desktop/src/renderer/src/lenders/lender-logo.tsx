@@ -39,6 +39,11 @@ function initials(name: string): string {
   );
 }
 
+/**
+ * A lender's logo (downloaded through Main and the API, shown as a data URL) or, when
+ * there is none, a badge with the lender's initials. Logos are cached per lender and
+ * logo version, so each is downloaded once.
+ */
 export function LenderLogo({
   lender,
   size = 28,

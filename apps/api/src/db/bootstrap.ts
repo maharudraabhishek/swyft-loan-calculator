@@ -21,9 +21,12 @@ export function scramSha256Verifier(
   return `SCRAM-SHA-256$${iterations}:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`;
 }
 
+/** Owns every schema object and runs migrations; never used by the running API. */
 export const ownerRole = 'swyft_owner';
+/** The API's runtime role: least privilege, owns nothing, subject to row-level security. */
 export const appRole = 'swyft_app';
 
+/** Database name and the passwords to set for the owner and runtime roles. */
 export interface BootstrapOptions {
   readonly database: string;
   readonly ownerPassword: string;

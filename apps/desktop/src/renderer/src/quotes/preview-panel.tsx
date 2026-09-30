@@ -7,6 +7,7 @@ import { formatDate, formatMoney, formatRate } from '../../../shared/format';
 import { monthlyFeeNote, repaymentParts } from '../../../shared/frequencies';
 import { commissionBasis } from './signature-labels';
 
+/** What the preview shows: waiting for input, working, a result, or a problem. */
 export type PreviewState =
   | { readonly status: 'incomplete' }
   | { readonly status: 'calculating' }

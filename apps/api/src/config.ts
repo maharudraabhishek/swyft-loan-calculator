@@ -53,15 +53,27 @@ const environmentSchema = z
     }
   });
 
+/** How long each sign-in artefact lives (see `defaultSessionPolicy` for the values). */
 export interface SessionPolicy {
+  /** Access (bearer) token lifetime. */
   readonly accessTtlSeconds: number;
+  /** A session ends if it is not refreshed for this long. */
   readonly refreshIdleTtlSeconds: number;
+  /** A session ends this long after sign-in, however active. */
   readonly refreshAbsoluteTtlSeconds: number;
+  /**
+   * If the response carrying a new refresh token is lost, the app may present the
+   * just-used token again within this window and get another rotation; any other reuse
+   * revokes the whole session.
+   */
   readonly refreshReuseGraceSeconds: number;
+  /** Time allowed to finish Google sign-in in the browser. */
   readonly loginAttemptTtlSeconds: number;
+  /** Lifetime of the single-use code handed to the app's loopback address. */
   readonly authorizationCodeTtlSeconds: number;
 }
 
+/** Validated API configuration, read once from environment variables at startup. */
 export interface ApiConfig {
   readonly environment: 'development' | 'test' | 'production';
   readonly host: string;
@@ -101,6 +113,7 @@ export const defaultSessionPolicy: SessionPolicy = {
   authorizationCodeTtlSeconds: 2 * 60,
 };
 
+/** Startup configuration problems. Lists variable names only, never values (they may be secrets). */
 export class ConfigurationError extends Error {
   constructor(readonly problems: readonly string[]) {
     // Names only: values may be secrets.

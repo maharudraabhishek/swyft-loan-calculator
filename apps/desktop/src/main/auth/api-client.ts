@@ -30,6 +30,7 @@ export class ApiResponseError extends Error {
   }
 }
 
+/** `fetch`-compatible function; Main passes Electron's `net.fetch`, tests pass a stub. */
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 const requestTimeoutMs = 15_000;

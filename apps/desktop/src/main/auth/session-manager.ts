@@ -8,6 +8,7 @@ import {
 import type { LoopbackReceiver } from './loopback';
 import type { SecureSessionStore } from './session-store';
 
+/** Collaborators of the session manager, injected so sign-in can be tested without Electron. */
 export interface SessionManagerDependencies {
   readonly api: AuthApiClient;
   readonly store: SecureSessionStore;

@@ -13,6 +13,10 @@ type DailyDates = Pick<
   'termMonths' | 'settlementDate' | 'firstRepaymentDate' | 'adjustBusinessDays'
 >;
 
+/**
+ * One daily-interest repayment period: its (business-day adjusted) due date and the
+ * number of days of interest it carries (the first period includes settlement day).
+ */
 export interface DailyPeriod {
   readonly period: number;
   readonly dueDate: string;

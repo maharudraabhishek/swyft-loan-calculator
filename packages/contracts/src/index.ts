@@ -20,6 +20,10 @@ import {
  */
 export type DecimalString = string;
 
+/**
+ * One repayment in a schedule, as shown in the preview. Amounts are cent decimal
+ * strings; `paymentDate` is present once the schedule is dated (settlement date known).
+ */
 export interface ScheduleRowDto {
   readonly paymentNumber: number;
   readonly paymentDate?: string;
@@ -61,6 +65,55 @@ export interface DesktopAuthBridge {
 }
 
 // ---------------------------------------------------------------------------
+// Application menu
+// ---------------------------------------------------------------------------
+/**
+ * Commands the native application menu (and its keyboard shortcuts) can send to the
+ * UI. The list is closed: Main only sends these names, Preload drops anything else,
+ * and the UI decides what each one means.
+ */
+export const menuCommands = [
+  'new-deal',
+  'show-calculator',
+  'show-lenders',
+  'toggle-deal-list',
+] as const;
+/** One of {@link menuCommands}. */
+export type MenuCommand = (typeof menuCommands)[number];
+
+/** True if `value` is one of the known menu commands (use on anything received over IPC). */
+export function isMenuCommand(value: unknown): value is MenuCommand {
+  return (
+    typeof value === 'string' &&
+    (menuCommands as readonly string[]).includes(value)
+  );
+}
+
+/** One-way Main → UI notifications from the application menu. */
+export interface DesktopMenuBridge {
+  /** @returns a function that removes the listener */
+  onCommand(listener: (command: MenuCommand) => void): () => void;
+}
+
+/**
+ * Automatic updates (installed Windows app only). `ready` means a newer version has been
+ * downloaded and verified and installs when the user restarts, or when the app quits.
+ * Checking, downloading and failures (e.g. offline) are silent, so they have no state.
+ */
+export type UpdateStatus =
+  | { readonly state: 'none' }
+  | { readonly state: 'ready'; readonly version: string };
+
+/** Update notice for the UI: read the status, hear when an update is ready, restart to install. */
+export interface DesktopUpdatesBridge {
+  getStatus(): Promise<UpdateStatus>;
+  /** Quits and installs the downloaded update, then reopens the app. Does nothing if none is ready. */
+  install(): Promise<void>;
+  /** @returns a function that removes the listener */
+  onStatus(listener: (status: UpdateStatus) => void): () => void;
+}
+
+// ---------------------------------------------------------------------------
 // API results over IPC
 // ---------------------------------------------------------------------------
 /**
@@ -78,6 +131,7 @@ export type ApiFailureKind =
   | 'server'
   | 'invalid-request';
 
+/** Why a request failed, in a form the UI can show directly. */
 export interface ApiFailure {
   readonly kind: ApiFailureKind;
   /** Safe, user-facing text; never a stack, SQL or token. */
@@ -86,6 +140,10 @@ export interface ApiFailure {
   readonly fields?: Readonly<Record<string, string>>;
 }
 
+/**
+ * Result of every cloud call that crosses IPC. Failures are data, never thrown
+ * exceptions, so the UI always gets a message it can show.
+ */
 export type ApiResult<T> =
   | { readonly ok: true; readonly data: T }
   | { readonly ok: false; readonly error: ApiFailure };
@@ -156,6 +214,10 @@ export const quotePreviewRequestSchema = z.strictObject({
   request: quoteCreateSchema,
   scheduleStartDate: isoDateSchema.optional(),
 });
+/**
+ * Everything the local preview needs: the chosen fee signature and the broker's choices.
+ * The preview runs in Main with the same code the API uses to recalculate a saved quote.
+ */
 export interface QuotePreviewRequestDto {
   readonly signature: FeeSignatureDto;
   readonly request: QuoteCreateDto;
@@ -184,6 +246,7 @@ export interface QuotePreviewDto {
   readonly schedule: readonly ScheduleRowDto[];
 }
 
+/** A calculated preview, or a message plus field problems to show next to the inputs. */
 export type QuotePreviewResponseDto =
   | { readonly ok: true; readonly preview: QuotePreviewDto }
   | {
@@ -201,6 +264,7 @@ export const targetCommissionRequestSchema = z.strictObject({
   request: quoteCreateSchema,
   targetCommission: moneySchema,
 });
+/** Request for the target-commission calculator (solved locally, like the preview). */
 export interface TargetCommissionRequestDto {
   readonly signature: FeeSignatureDto;
   readonly request: QuoteCreateDto;
@@ -232,6 +296,7 @@ export type TargetCommissionResponseDto =
 // Display preferences and client export
 // ---------------------------------------------------------------------------
 export const paymentFrequencies = ['monthly', 'fortnightly', 'weekly'] as const;
+/** A repayment frequency the log and email can show. */
 export type PaymentFrequency = (typeof paymentFrequencies)[number];
 
 /**
@@ -249,8 +314,10 @@ export const displayOptionsSchema = z.strictObject({
   showCommission: z.boolean(),
   showTotalHiring: z.boolean(),
 });
+/** Which frequencies and optional figures the log, comparison and email show. */
 export type DisplayOptions = z.infer<typeof displayOptionsSchema>;
 
+/** First-run display: monthly repayments, rates and total hiring shown, commission hidden (client-safe). */
 export const defaultDisplayOptions: DisplayOptions = {
   frequencies: { monthly: true, fortnightly: false, weekly: false },
   showBaseRate: true,
@@ -262,10 +329,12 @@ export const defaultDisplayOptions: DisplayOptions = {
 /** Upper bound on quotes per export; one deal's log is far smaller in practice. */
 export const maxExportQuotes = 100;
 
+/** IPC request to copy the client email: the selected saved quotes plus display options. */
 export const quoteExportRequestSchema = z.strictObject({
   quotes: z.array(ipcQuoteSchema).min(1).max(maxExportQuotes),
   display: displayOptionsSchema,
 });
+/** The quotes to export and which figures to include (Main renders the HTML and text). */
 export interface QuoteExportRequestDto {
   readonly quotes: readonly QuoteDto[];
   readonly display: DisplayOptions;
@@ -282,6 +351,7 @@ export interface DealPageDto {
 /** Fee-signature fields a broker may edit on their own (custom) signature. */
 export type FeeSignatureEditDto = z.input<typeof feeSignatureDefinitionSchema>;
 
+/** Deal operations exposed to the UI (each is one API call made by Main). */
 export interface DesktopDealsBridge {
   list(cursor?: string): Promise<ApiResult<DealPageDto>>;
   create(name: string): Promise<ApiResult<DealDto>>;
@@ -289,6 +359,7 @@ export interface DesktopDealsBridge {
   remove(dealId: string): Promise<ApiResult<null>>;
 }
 
+/** Quote operations: saved quotes via the API, preview and target commission locally, and clipboard export. */
 export interface DesktopQuotesBridge {
   list(dealId: string): Promise<ApiResult<readonly QuoteDto[]>>;
   /** `idempotencyKey` must be reused when retrying the same draft. */
@@ -313,6 +384,7 @@ export interface DesktopQuotesBridge {
   ): Promise<ApiResult<{ readonly quoteCount: number }>>;
 }
 
+/** Lender, logo and fee-signature operations exposed to the UI. */
 export interface DesktopLendersBridge {
   listLenders(): Promise<ApiResult<readonly LenderDto[]>>;
   /** Custom lenders belong to the signed-in broker; presets are read-only. */
@@ -353,6 +425,8 @@ export interface DesktopBridge {
   readonly deals: DesktopDealsBridge;
   readonly quotes: DesktopQuotesBridge;
   readonly lenders: DesktopLendersBridge;
+  readonly menu: DesktopMenuBridge;
+  readonly updates: DesktopUpdatesBridge;
 }
 
 export * from './http.js';

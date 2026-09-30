@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   defaultDisplayOptions,
   displayOptionsSchema,
+  feeSignatureDefinitionSchema,
+  feeSignatureSchema,
+  isMenuCommand,
   maxExportQuotes,
+  menuCommands,
   quoteExportRequestSchema,
   quotePreviewRequestSchema,
   type FeeSignatureDto,
@@ -95,6 +99,47 @@ describe('IPC preview request validation', () => {
     expect(
       quotePreviewRequestSchema.safeParse({ signature, request: bad }).success,
     ).toBe(false);
+  });
+});
+
+describe('fee signature compatibility', () => {
+  it('reads signatures with and without the whole-dollar flag, and nothing else new', () => {
+    expect(feeSignatureSchema.safeParse(signature).success).toBe(true);
+    expect(
+      feeSignatureSchema.safeParse({
+        ...signature,
+        roundPaymentUpToDollar: true,
+      }).success,
+    ).toBe(true);
+    expect(
+      feeSignatureSchema.safeParse({ ...signature, unexpected: true }).success,
+    ).toBe(false);
+  });
+
+  it('keeps the flag optional in a signature definition (older apps omit it)', () => {
+    const definition = {
+      lenderId: signature.lenderId,
+      name: 'Dealer',
+      commissionModel: 'capitalised',
+      paymentTiming: 'arrears',
+    };
+    const parsed = feeSignatureDefinitionSchema.parse(definition);
+    expect(parsed.roundPaymentUpToDollar).toBeUndefined();
+    expect(
+      feeSignatureDefinitionSchema.parse({
+        ...definition,
+        roundPaymentUpToDollar: true,
+      }).roundPaymentUpToDollar,
+    ).toBe(true);
+  });
+});
+
+describe('application menu commands', () => {
+  it('recognises only the defined commands', () => {
+    for (const command of menuCommands)
+      expect(isMenuCommand(command)).toBe(true);
+    for (const other of ['open-devtools', '', 42, undefined, null])
+      expect(isMenuCommand(other)).toBe(false);
   });
 });
 

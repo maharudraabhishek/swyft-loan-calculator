@@ -535,6 +535,70 @@ describe('lenders, fee signatures and logos', () => {
     expect(duplicate.statusCode).toBe(409);
   });
 
+  it('rounds repayments up to whole dollars only for signatures that ask for it', async () => {
+    // Built-in signatures never carry the flag, so app versions that predate it (and
+    // parse strictly) keep working against this API.
+    const presets = (await call(alice, 'GET', '/v1/fee-signatures')).json<{
+      items: FeeSignatureDto[];
+    }>();
+    expect(
+      presets.items.filter(
+        (item) => item.isPreset && 'roundPaymentUpToDollar' in item,
+      ),
+    ).toEqual([]);
+
+    const lender = (
+      await call(alice, 'POST', '/v1/lenders', {
+        name: `Whole dollar ${Date.now()}`,
+      })
+    ).json<LenderDto>();
+    const definition = {
+      lenderId: lender.id,
+      name: 'Dealer',
+      commissionModel: 'capitalised',
+      paymentTiming: 'arrears',
+      maxCommissionRate: '0.06',
+      fees: { establishment: { amount: '495', financed: true } },
+    };
+    const created = await call(alice, 'POST', '/v1/fee-signatures', {
+      ...definition,
+      roundPaymentUpToDollar: true,
+    });
+    expect(created.statusCode).toBe(201);
+    const signature = created.json<FeeSignatureDto>();
+    expect(signature.roundPaymentUpToDollar).toBe(true);
+
+    // The server recalculates with the lender's rule: $650.68 becomes $651.00.
+    const deal = await createDeal(alice, 'Whole-dollar deal');
+    const saved = await saveQuote(alice, deal.id, {
+      ...westpacQuote,
+      feeSignatureId: signature.id,
+    });
+    expect(saved.statusCode).toBe(201);
+    expect(saved.json<QuoteDto>().monthlyPayment).toBe('651.00');
+    expect(saved.json<QuoteDto>().totalHiring).toBe('39036.02');
+
+    // An update that omits the flag (as older app versions do) keeps it...
+    const kept = await call(
+      alice,
+      'PUT',
+      `/v1/fee-signatures/${signature.id}`,
+      { ...definition, name: 'Dealer renamed' },
+    );
+    expect(kept.json<FeeSignatureDto>().roundPaymentUpToDollar).toBe(true);
+    // ...a copy keeps it too...
+    const copy = await call(alice, 'POST', '/v1/fee-signatures', {
+      copyFromId: signature.id,
+    });
+    expect(copy.json<FeeSignatureDto>().roundPaymentUpToDollar).toBe(true);
+    // ...and `false` switches it off (then the DTO omits it).
+    const off = await call(alice, 'PUT', `/v1/fee-signatures/${signature.id}`, {
+      ...definition,
+      roundPaymentUpToDollar: false,
+    });
+    expect('roundPaymentUpToDollar' in off.json<FeeSignatureDto>()).toBe(false);
+  });
+
   it('stores, serves, replaces and deletes a logo through the API only', async () => {
     const lender = (
       await call(alice, 'POST', '/v1/lenders', { name: `Logo ${Date.now()}` })

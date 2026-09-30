@@ -10,6 +10,7 @@ export interface VerifiedIdentity {
   readonly displayName: string | null;
 }
 
+/** What the identity provider returns when a sign-in starts. */
 export interface SignInStart {
   /** Where to send the user's browser. */
   readonly authorizationUrl: string;

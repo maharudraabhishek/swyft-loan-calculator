@@ -23,17 +23,20 @@ export interface ExportLine {
   readonly value: string;
 }
 
+/** One quote in the email: its Term/Repayments/Residual table plus footer lines. */
 export interface ExportOption {
   readonly quoteId: string;
   readonly rows: readonly ExportLine[];
   readonly footer: readonly ExportLine[];
 }
 
+/** Quotes sharing a finance amount and asset, under one header table. */
 export interface ExportGroup {
   readonly header: readonly ExportLine[];
   readonly options: readonly ExportOption[];
 }
 
+/** The export model plus the two clipboard formats built from it. */
 export interface QuoteExport {
   readonly groups: readonly ExportGroup[];
   readonly html: string;
@@ -189,6 +192,7 @@ function footerHtml(lines: readonly ExportLine[]): string {
     .join('');
 }
 
+/** Email-safe HTML: inline styles only, bordered tables, all text escaped. */
 export function renderExportHtml(groups: readonly ExportGroup[]): string {
   const body = groups
     .map((group) => {
@@ -204,6 +208,7 @@ export function renderExportHtml(groups: readonly ExportGroup[]): string {
   return `<div style="${font}">${body}</div>`;
 }
 
+/** Plain-text version for editors that do not accept HTML. */
 export function renderExportText(groups: readonly ExportGroup[]): string {
   const line = (item: ExportLine) => `${item.label}: ${item.value}`;
   return groups
@@ -223,6 +228,7 @@ export function renderExportText(groups: readonly ExportGroup[]): string {
     .join('\n\n----------------------------------------\n\n');
 }
 
+/** Builds the client email for the selected quotes, honouring the display options. */
 export function buildQuoteExport(
   quotes: readonly QuoteDto[],
   display: DisplayOptions,

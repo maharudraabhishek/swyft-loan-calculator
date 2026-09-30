@@ -1,5 +1,6 @@
 import { AnnualRate, Fraction, Money } from '@swyft/finance';
 
+/** Plain JSON, as stored in the quote snapshot columns (`jsonb`). */
 export type JsonValue =
   | string
   | number

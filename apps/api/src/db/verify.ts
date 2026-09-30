@@ -2,6 +2,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import type pg from 'pg';
 import type { Migration } from './migrator.js';
 
+/** Outcome of each post-migration security check (roles, grants, RLS, isolation probes). */
 export interface VerificationResult {
   readonly checks: readonly {
     readonly name: string;

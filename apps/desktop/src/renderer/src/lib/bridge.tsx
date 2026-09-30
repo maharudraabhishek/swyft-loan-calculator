@@ -7,6 +7,7 @@ import type { DesktopBridge } from '@swyft/contracts';
  */
 const BridgeContext = createContext<DesktopBridge | undefined>(undefined);
 
+/** Makes the preload bridge (`window.swyft`, or a test double) available to the UI. */
 export function BridgeProvider({
   bridge,
   children,
@@ -19,6 +20,7 @@ export function BridgeProvider({
   );
 }
 
+/** The preload bridge. Components call Main only through this. */
 export function useBridge(): DesktopBridge {
   const bridge = useContext(BridgeContext);
   if (bridge === undefined)

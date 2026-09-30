@@ -61,6 +61,19 @@ describe('composeQuote', () => {
     ).toBe('0.1018');
   });
 
+  it('passes whole-dollar rounding to the engine only for signatures that use it', () => {
+    expect(composeQuote(signature(), request()).input).not.toHaveProperty(
+      'paymentRounding',
+    );
+    const wholeDollar = calculateFromSignature(
+      signature({ roundPaymentUpToDollar: true }),
+      request(),
+    );
+    expect(wholeDollar.input).toMatchObject({ paymentRounding: 'dollar-up' });
+    expect(wholeDollar.result.monthlyPayment.toFixed(2)).toBe('651.00');
+    expect(wholeDollar.commissionRate?.toString()).toBe('0.04');
+  });
+
   it('maps a commission-overs signature to the Branded central fixture', () => {
     const branded = signature({
       commissionModel: 'overs',

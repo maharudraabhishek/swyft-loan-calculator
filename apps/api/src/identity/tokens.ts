@@ -15,6 +15,7 @@ export function pkceChallenge(verifier: string): string {
   return createHash('sha256').update(verifier, 'ascii').digest('base64url');
 }
 
+/** Compares two secrets without leaking, through timing, how much of them matched. */
 export function constantTimeEqual(left: string, right: string): boolean {
   const a = Buffer.from(left);
   const b = Buffer.from(right);

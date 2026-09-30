@@ -1,0 +1,72 @@
+# Every push to master and every pull request: the same checks as `pnpm verify`.
+# Linux runs everything that needs PostgreSQL (Docker); Windows runs the desktop tests
+# on the platform the app ships for. Nothing is uploaded, so no artifact storage is used.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Checks (Linux + PostgreSQL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0 (version from packageManager)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm build
+      - name: Database tests (PostgreSQL 17, roles and row-level security)
+        run: pnpm test:db
+      - name: Real-stack tests (desktop UI and Main against the real API)
+        run: pnpm test:integration
+      - name: Unit tests
+        run: pnpm -r --filter '!@swyft/finance' run test
+      # The official test-cases.json suite stays red on purpose (see README, Known
+      # limitations). This step shows that result as it is and may fail; the next step
+      # is the gate, which fails on any other finance failure and on any change to the
+      # documented differences.
+      - name: Official fixtures (documented upstream contradictions, allowed to fail)
+        continue-on-error: true
+        run: pnpm --filter @swyft/finance exec vitest run tests/upstream-fixtures.test.ts
+      - name: Finance tests (only the five documented official cases may differ)
+        run: node scripts/check-finance.mjs
+      - name: Launcher tests
+        run: python3 -m unittest discover scripts
+
+  windows:
+    name: Desktop tests (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @swyft/desktop test
+      - name: Launcher tests
+        run: python -m unittest discover scripts

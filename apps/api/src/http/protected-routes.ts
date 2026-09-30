@@ -18,6 +18,7 @@ import { maxLogoBytes } from '../storage/logo-storage.js';
 import { unauthenticated, validationFailed } from './errors.js';
 import { parse, principalOf } from './validation.js';
 
+/** Business services behind the authenticated routes. */
 export interface ProtectedRouteServices {
   readonly auth: AuthService;
   readonly deals: DealService;

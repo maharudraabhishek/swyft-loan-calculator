@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { defaultDisplayOptions } from '@swyft/contracts';
+import { defaultDisplayOptions, menuCommands } from '@swyft/contracts';
 import { describe, expect, it, vi } from 'vitest';
+import { updateChannels } from '../updates';
 import {
   dealFixture,
   quoteFixture,
@@ -377,5 +378,28 @@ describe('business IPC handlers', () => {
       .map((match) => match[1])
       .sort();
     expect(used).toEqual(Object.values(businessChannels).sort());
+  });
+
+  it('Preload uses exactly the update channels Main defines', () => {
+    const preload = readFileSync(
+      new URL('../../preload/index.ts', import.meta.url),
+      'utf8',
+    );
+    const used = [...preload.matchAll(/'(updates:[a-z-]+:v\d)'/g)]
+      .map((match) => match[1])
+      .sort();
+    expect(used).toEqual(Object.values(updateChannels).sort());
+  });
+
+  it('Preload accepts exactly the menu commands the contract defines', () => {
+    const preload = readFileSync(
+      new URL('../../preload/index.ts', import.meta.url),
+      'utf8',
+    );
+    const list = /knownMenuCommands[^=]*=\s*\[([^\]]*)\]/.exec(preload)?.[1];
+    const accepted = [...(list ?? '').matchAll(/'([a-z-]+)'/g)].map(
+      (match) => match[1],
+    );
+    expect(accepted.sort()).toEqual([...menuCommands].sort());
   });
 });

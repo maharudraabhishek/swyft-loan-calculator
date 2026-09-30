@@ -61,6 +61,7 @@ export function fractionToPercent(fraction: string): string {
   return new Decimal(fraction).mul(100).toString();
 }
 
+/** `60` → `"60 months"`. */
 export function formatTerm(months: number): string {
   return `${months} ${months === 1 ? 'month' : 'months'}`;
 }
@@ -89,6 +90,7 @@ export function formatDate(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : dateFormat.format(date);
 }
 
+/** True for a decimal string greater than zero; false for anything unparsable. */
 export function isPositiveAmount(value: string): boolean {
   try {
     return new Decimal(value).greaterThan(0);

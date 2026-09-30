@@ -11,6 +11,7 @@ import { parse } from '../http/validation.js';
 import type { AuthService } from './auth-service.js';
 import { IdentityVerificationError } from './identity-provider.js';
 
+/** Dependencies of the sign-in routes. */
 export interface AuthRouteOptions {
   readonly auth: AuthService;
   readonly publicBaseUrl: URL;
@@ -19,6 +20,7 @@ export interface AuthRouteOptions {
   readonly rateLimits?: Partial<AuthRateLimits>;
 }
 
+/** Maximum requests per minute per client IP for each sign-in endpoint. */
 export interface AuthRateLimits {
   readonly login: number;
   readonly callback: number;
@@ -26,6 +28,7 @@ export interface AuthRateLimits {
   readonly logout: number;
 }
 
+/** Production limits: generous for real users, tight enough to slow automated abuse. */
 export const defaultAuthRateLimits: AuthRateLimits = {
   login: 20,
   callback: 30,

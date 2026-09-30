@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ApiFailure, DealDto, DealPageDto } from '@swyft/contracts';
 import { formatDate } from '../../../shared/format';
 import { useBridge } from '../lib/bridge';
@@ -14,6 +14,7 @@ export function DealSidebar({
   onRetry,
   onLoadMore,
   loadingMore,
+  newDealRequest = 0,
 }: {
   readonly deals: Resource<DealPageDto>;
   readonly selectedId: string | undefined;
@@ -22,12 +23,24 @@ export function DealSidebar({
   readonly onRetry: () => void;
   readonly onLoadMore: () => void;
   readonly loadingMore: boolean;
+  /** Incremented by File → New Deal (Ctrl+N); each change opens the create form. */
+  readonly newDealRequest?: number;
 }): React.JSX.Element {
   const bridge = useBridge();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiFailure>();
+
+  const nameInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (newDealRequest === 0) return;
+    setCreating(true);
+    setError(undefined);
+    // Already open: move the cursor back to the name (a new form focuses itself).
+    nameInput.current?.focus();
+  }, [newDealRequest]);
 
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -72,6 +85,7 @@ export function DealSidebar({
         >
           <label htmlFor="new-deal-name">Deal name</label>
           <input
+            ref={nameInput}
             id="new-deal-name"
             value={name}
             maxLength={200}

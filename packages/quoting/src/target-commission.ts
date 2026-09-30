@@ -154,6 +154,14 @@ function withoutCommissionChoice(request: QuoteRequest): QuoteRequest {
   return copy as QuoteRequest;
 }
 
+/**
+ * Finds the rate that earns at least `target` commission for this signature and loan.
+ * The broker's current commission or contract rate in `request` is ignored (it is what
+ * is being solved for). Throws QuoteCompositionError, naming the field to highlight,
+ * when the target cannot be met: it is negative or above the amount financed, it needs
+ * more than the lender's commission cap, no contract rate reaches it, or the finance
+ * amount is missing.
+ */
 export function solveTargetCommission(
   signature: FeeSignature,
   request: QuoteRequest,

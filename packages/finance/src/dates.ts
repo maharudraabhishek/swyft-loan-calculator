@@ -134,6 +134,7 @@ const NSW_PROJECTED_HOLIDAYS = new Set([
   ...projectedHolidays(2032),
 ]);
 
+/** Parses a `YYYY-MM-DD` calendar date as UTC midnight; rejects impossible dates such as 2026-02-30. */
 export function parseDate(isoDate: string): Date {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate))
     throw new RangeError('Date must be ISO YYYY-MM-DD');
@@ -147,10 +148,12 @@ export function parseDate(isoDate: string): Date {
   return date;
 }
 
+/** Formats a UTC date as `YYYY-MM-DD`. */
 export function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Whole calendar days from `from` to `to` (negative if `to` is earlier). */
 export function daysBetween(from: Date, to: Date): number {
   return Math.round((to.getTime() - from.getTime()) / 86_400_000);
 }
@@ -195,6 +198,11 @@ export function monthlyDueDate(
   );
 }
 
+/**
+ * Moves a due date forward past weekends and NSW public holidays (the Autopay/MoneyMe
+ * lender is in Sydney). With `adjust` false the date is returned unchanged. Holidays are
+ * known for 2025–2032; dates outside that range throw rather than guess.
+ */
 export function nextBusinessDay(date: Date, adjust: boolean): Date {
   const due = new Date(date.getTime());
   if (!adjust) return due;

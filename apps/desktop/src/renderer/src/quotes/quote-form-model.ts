@@ -34,12 +34,15 @@ export interface QuoteFormValues {
   readonly firstRepaymentDate: string;
 }
 
+/** Text inputs of the quote form, named as in the request. */
 export type QuoteFormField = Exclude<
   keyof QuoteFormValues,
   'feeFinancing' | 'originationFinanced'
 >;
+/** Messages to show next to inputs (`form` = not tied to one input). */
 export type FieldErrors = Partial<Record<QuoteFormField | 'form', string>>;
 
+/** A lender fee the broker can choose to finance or pay at settlement. */
 export interface FeeToggle {
   readonly kind: LenderFeeKind;
   readonly label: string;
@@ -59,6 +62,7 @@ export interface FieldPlan {
   readonly fees: readonly FeeToggle[];
 }
 
+/** Which inputs, labels and fee toggles the form shows for this signature. */
 export function planFor(signature: FeeSignatureDto): FieldPlan {
   const fees: FeeToggle[] = [];
   for (const kind of lenderFeeKinds) {
@@ -160,9 +164,9 @@ function percentField(
 
 /** Schema messages phrased for the fields as the broker sees them. */
 const friendlyMessages: Partial<Record<QuoteFormField, string>> = {
-  // The shared schema allows up to 12 whole-dollar digits (below $1 trillion).
+  // The shared money schema allows at most $999,999,999.99 (nine whole-dollar digits).
   financeAmount:
-    'Enter an amount greater than zero and under $1 trillion, e.g. 30000',
+    'Enter an amount greater than zero and under $1 billion, e.g. 30000',
   termMonths: 'Enter a term from 1 to 600 whole months',
   balloon: 'Enter a dollar amount such as 5000 (or leave blank for none)',
   originationFee: 'Enter a dollar amount such as 990 (or leave blank)',
@@ -199,6 +203,7 @@ export function toFieldErrors(
   return errors;
 }
 
+/** The request to send, or the problems that stop it being sent. */
 export type RequestResult =
   | { readonly ok: true; readonly request: QuoteCreateDto }
   | { readonly ok: false; readonly errors: FieldErrors };

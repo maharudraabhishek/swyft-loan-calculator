@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -122,6 +123,61 @@ describe('deal workflow', () => {
   });
 });
 
+describe('application menu commands', () => {
+  it('switches views, toggles the deal list and opens New deal from the menu', async () => {
+    const fake = createFakeBridge();
+    renderShell(fake);
+    await screen.findByRole('heading', { level: 2, name: 'New quote' });
+
+    act(() => fake.sendMenuCommand('show-lenders'));
+    expect(
+      await screen.findByRole('heading', { name: 'Lender library' }),
+    ).toBeTruthy();
+    act(() => fake.sendMenuCommand('show-calculator'));
+    expect(
+      screen
+        .getByRole('button', { name: 'Calculator' })
+        .getAttribute('aria-current'),
+    ).toBe('page');
+
+    act(() => fake.sendMenuCommand('toggle-deal-list'));
+    expect(screen.queryByRole('navigation', { name: 'Deals' })).toBeNull();
+    // New deal reopens the list with the name field ready to type in.
+    act(() => fake.sendMenuCommand('new-deal'));
+    expect(await screen.findByLabelText('Deal name')).toBe(
+      document.activeElement,
+    );
+  });
+
+  it('shows a downloaded update and installs it only when asked', async () => {
+    const fake = createFakeBridge();
+    renderShell(fake);
+    await screen.findByRole('heading', { level: 2, name: 'New quote' });
+    expect(screen.queryByText(/ready to install/)).toBeNull();
+
+    act(() => fake.updateReady('1.1.1'));
+    expect(
+      await screen.findByText('Swyft Finance 1.1.1 is ready to install.'),
+    ).toBeTruthy();
+    expect(fake.bridge.updates.install).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Restart and update' }));
+    expect(fake.bridge.updates.install).toHaveBeenCalledTimes(1);
+    expect(
+      (screen.getByRole('button', { name: 'Restarting…' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it('shows an update that finished downloading before the window opened', async () => {
+    const fake = createFakeBridge();
+    fake.updateReady('1.1.1');
+    renderShell(fake);
+    expect(
+      await screen.findByText('Swyft Finance 1.1.1 is ready to install.'),
+    ).toBeTruthy();
+  });
+});
+
 describe('calculator without a deal', () => {
   const secondDeal = dealFixture({
     id: '20000000-0000-4000-8000-000000000002',
@@ -149,7 +205,7 @@ describe('calculator without a deal', () => {
         .getAttribute('aria-current'),
     ).toBe('page');
     // The quote log and client email belong to a deal.
-    for (const name of ['Saved quotes', 'Client email'])
+    for (const name of ['Quote log', 'Client email'])
       expect(
         (screen.getByRole('tab', { name }) as HTMLButtonElement).disabled,
       ).toBe(true);
@@ -190,7 +246,7 @@ describe('calculator without a deal', () => {
       expect.objectContaining({ financeAmount: '30000' }),
     );
     expect(
-      await screen.findByRole('tab', { name: 'Saved quotes (1)' }),
+      await screen.findByRole('tab', { name: 'Quote log (1)' }),
     ).toBeTruthy();
     expect(screen.getByRole('button', { name: /Nguyen — Camry/ })).toBeTruthy();
     // The loan details stay for quoting the next lender.
@@ -205,7 +261,7 @@ describe('calculator without a deal', () => {
     renderShell(fake);
     await openDeal();
     type(/Finance amount/, '45000');
-    fireEvent.click(screen.getByRole('tab', { name: /Saved quotes/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Quote log/ }));
     await screen.findByRole('table');
 
     // The second deal's log is still loading: the first deal's rows must not linger.
@@ -287,7 +343,7 @@ describe('quote workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View saved quotes' }));
     const log = await screen.findByRole('table');
     expect(within(log).getByText('$777.77')).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Saved quotes (1)' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Quote log (1)' })).toBeTruthy();
   });
 
   it('finds the rate for a target commission and applies it', async () => {
@@ -414,7 +470,7 @@ describe('quote workflow', () => {
     renderShell(fake);
     await openDeal();
     type(/Finance amount/, '45000');
-    fireEvent.click(screen.getByRole('tab', { name: /Saved quotes/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Quote log/ }));
     fireEvent.click(screen.getByRole('tab', { name: 'Quote builder' }));
     expect(input(/Finance amount/).value).toBe('45000');
   });
@@ -424,7 +480,7 @@ describe('quote log', () => {
   async function openLog(fake: Fake) {
     renderShell(fake);
     await openDeal();
-    fireEvent.click(screen.getByRole('tab', { name: /Saved quotes/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Quote log/ }));
     return screen.findByRole('table');
   }
 
@@ -499,7 +555,7 @@ describe('quote log', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Compare side by side' }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Quote log' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }));
     expect(screen.getByText('Unsaved note…')).toBeTruthy();
   });
 
@@ -594,9 +650,9 @@ describe('quote log', () => {
     });
     renderShell(fake);
     await openDeal();
-    fireEvent.click(screen.getByRole('tab', { name: /Saved quotes/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Quote log/ }));
     expect(
-      await screen.findByText('Saved quotes could not be loaded.'),
+      await screen.findByText('The quote log could not be loaded.'),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByRole('table')).toBeTruthy();
@@ -608,7 +664,7 @@ describe('client email export', () => {
     const fake = createFakeBridge({ quotes: [...savedQuotes] });
     renderShell(fake);
     await openDeal();
-    fireEvent.click(screen.getByRole('tab', { name: /Saved quotes/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Quote log/ }));
     await screen.findByRole('table');
     fireEvent.click(
       screen.getByRole('checkbox', {
@@ -674,6 +730,53 @@ describe('lender library', () => {
     fireEvent.click(edits[1]!);
     expect(input(/Signature name/).value).toBe('Beta');
     expect(input('Monthly fee').value).toBe('2.00');
+  });
+
+  it('previews whole-dollar repayments and edits the setting', async () => {
+    const wholeDollar = {
+      ...signatureFixtures.westpacDealer,
+      id: '71111111-1111-4111-8111-000000000009',
+      name: 'Whole dollar',
+      isPreset: false,
+      sourceFeeSignatureId: signatureFixtures.westpacDealer.id,
+      roundPaymentUpToDollar: true,
+    };
+    const fake = createFakeBridge({
+      signatures: [signatureFixtures.westpacDealer, wholeDollar],
+    });
+    renderShell(fake);
+    await screen.findByRole('heading', { level: 2, name: 'New quote' });
+    fireEvent.change(screen.getByLabelText('Lender and fee signature'), {
+      target: { value: wholeDollar.id },
+    });
+    type(/Finance amount/, '30000');
+    type(/Base rate/, '8.5');
+    const preview = screen.getByRole('region', { name: 'Preview' });
+    // $646.21 at cent rounding becomes $647.00 for a whole-dollar lender.
+    expect(
+      (await within(preview).findAllByText('$647.00', {}, { timeout: 2000 }))
+        .length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/repayments rounded up to whole dollars/).length,
+    ).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Lenders' }));
+    fireEvent.click(
+      (await screen.findAllByRole('button', { name: 'Edit' }))[0]!,
+    );
+    const toggle = screen.getByRole('checkbox', {
+      name: 'Round repayments up to the whole dollar',
+    }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: 'Save signature' }));
+    await waitFor(() =>
+      expect(fake.bridge.lenders.updateSignature).toHaveBeenCalledWith(
+        wholeDollar.id,
+        expect.objectContaining({ roundPaymentUpToDollar: false }),
+      ),
+    );
   });
 
   it('duplicates a built-in signature and deletes the custom copy', async () => {

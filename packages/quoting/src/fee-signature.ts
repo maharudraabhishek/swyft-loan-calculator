@@ -9,8 +9,10 @@ import type {
 export type CommissionModel =
   'capitalised' | 'overs' | 'loaded' | 'daily_interest';
 
+/** `monthly` compounding (most lenders) or `daily` interest over actual days (Autopay). */
 export type InterestMethod = 'monthly' | 'daily';
 
+/** Lender fee types a signature can carry, in display order. */
 export const lenderFeeKinds = [
   'establishment',
   'ppsrRegistration',
@@ -18,6 +20,7 @@ export const lenderFeeKinds = [
   'privateSale',
 ] as const;
 
+/** One of {@link lenderFeeKinds}. */
 export type LenderFeeKind = (typeof lenderFeeKinds)[number];
 
 /** A lender-charged fee with its default financing. */
@@ -53,6 +56,12 @@ export interface FeeSignature {
   readonly monthlyFee: Money;
   readonly slidingFee: Money;
   readonly maxBrokerOrigination?: Money;
+  /**
+   * The lender charges whole-dollar instalments: the cent payment is rounded up to the
+   * next dollar and the final instalment reduced (brief, "Rounding Rules"). No built-in
+   * lender does this; a broker can switch it on for a custom signature.
+   */
+  readonly roundPaymentUpToDollar?: boolean;
   readonly fees: Readonly<Partial<Record<LenderFeeKind, LenderFee>>>;
 }
 

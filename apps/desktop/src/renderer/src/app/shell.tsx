@@ -8,6 +8,7 @@ import { useDisplayOptions } from '../lib/display-options';
 import { useOnline } from '../lib/use-online';
 import { useResource } from '../lib/use-resource';
 import { ErrorBoundary, ErrorNotice } from '../ui/notice';
+import { UpdateNotice } from './update-notice';
 
 type View = 'deals' | 'lenders';
 
@@ -28,6 +29,7 @@ function useNarrowWindow(): boolean {
   return narrow;
 }
 
+/** Who is signed in, for the header. */
 export interface SignedInUser {
   readonly email: string;
   readonly displayName: string | null;
@@ -56,6 +58,30 @@ export function Shell({
   const [signingOut, setSigningOut] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [display, setDisplay] = useDisplayOptions();
+  const [newDealRequest, setNewDealRequest] = useState(0);
+
+  // Application menu and keyboard shortcuts (File → New Deal, View → Calculator, ...).
+  useEffect(
+    () =>
+      bridge.menu.onCommand((command) => {
+        switch (command) {
+          case 'new-deal':
+            setSidebarOpen(true);
+            setNewDealRequest((count) => count + 1);
+            break;
+          case 'show-calculator':
+            setView('deals');
+            break;
+          case 'show-lenders':
+            setView('lenders');
+            break;
+          case 'toggle-deal-list':
+            setSidebarOpen((open) => !open);
+            break;
+        }
+      }),
+    [bridge],
+  );
 
   const loadDeals = useCallback(() => bridge.deals.list(), [bridge]);
   const deals = useResource<DealPageDto>(loadDeals, 'deals');
@@ -158,6 +184,7 @@ export function Shell({
           work; nothing is saved offline.
         </div>
       )}
+      <UpdateNotice />
 
       <div className={`app-body${sidebarOpen ? ' with-sidebar' : ''}`}>
         {sidebarOpen && narrow && (
@@ -194,6 +221,7 @@ export function Shell({
               onRetry={deals.reload}
               onLoadMore={() => void loadMore()}
               loadingMore={loadingMore}
+              newDealRequest={newDealRequest}
             />
           </div>
         )}

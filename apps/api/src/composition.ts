@@ -17,11 +17,13 @@ import {
   type LogoStorage,
 } from './storage/logo-storage.js';
 
+/** The configured Fastify app plus its database pool (closed together on shutdown). */
 export interface Application {
   readonly app: FastifyInstance;
   readonly database: Database;
 }
 
+/** Test seams: replace the database, identity provider, logo storage or rate limits. */
 export interface Overrides {
   readonly database?: Database;
   readonly identityProvider?: IdentityProvider;

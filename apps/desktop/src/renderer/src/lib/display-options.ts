@@ -12,6 +12,7 @@ import {
  */
 const storageKey = 'swyft.display-options.v1';
 
+/** Saved display options, validated; anything missing or invalid falls back to the defaults. */
 export function readDisplayOptions(
   storage: Storage | undefined,
 ): DisplayOptions {
@@ -41,6 +42,7 @@ function safeStorage(): Storage | undefined {
   }
 }
 
+/** Display options for this device, persisted to local storage as they change. */
 export function useDisplayOptions(): readonly [
   DisplayOptions,
   (next: DisplayOptions) => void,

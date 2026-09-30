@@ -93,6 +93,7 @@ export function TextField({
   );
 }
 
+/** A labelled checkbox, or an on/off switch with `appearance="switch"`. */
 export function Checkbox({
   label,
   checked,

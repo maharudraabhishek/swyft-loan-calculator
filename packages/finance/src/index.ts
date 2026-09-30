@@ -14,6 +14,7 @@ export type {
   BrandedResult,
   CapitalisedInput,
   CapitalisedResult,
+  PaymentRounding,
   PaymentTiming,
   PepperInput,
   PepperResult,

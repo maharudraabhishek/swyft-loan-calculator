@@ -385,6 +385,18 @@ h3 {
   border-bottom: 1px solid var(--warning-border);
   background: var(--warning-soft);
 }
+.update-banner {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+}
+.update-banner > span {
+  flex: 1;
+}
 .app-body {
   display: flex;
   flex: 1;

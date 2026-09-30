@@ -13,6 +13,10 @@ import {
 } from './identity/auth-routes.js';
 import type { LenderService } from './lenders/lender-service.js';
 
+/**
+ * What the HTTP layer needs: settings plus the business services (auth, deals, lenders)
+ * and a readiness probe. `composition.ts` builds the real ones; tests inject their own.
+ */
 export interface AppDependencies {
   readonly logLevel: string;
   /** Proxy hops to trust for the client IP (Cloud Run: 1). Only used for rate limiting. */

@@ -7,6 +7,7 @@ const migrationFile = /^(\d{4})_([a-z0-9_]+)\.sql$/;
 // Arbitrary constant shared by every runner so concurrent deploys apply migrations once.
 const advisoryLockKey = 7_401_239_118;
 
+/** One `NNNN_name.sql` file with its SHA-256, recorded when applied. */
 export interface Migration {
   readonly version: string;
   readonly name: string;
@@ -14,6 +15,7 @@ export interface Migration {
   readonly sha256: string;
 }
 
+/** A migration could not be applied, or an applied file has changed (checksum mismatch). */
 export class MigrationError extends Error {
   constructor(message: string) {
     super(message);

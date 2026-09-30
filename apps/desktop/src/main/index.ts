@@ -5,16 +5,20 @@ import {
   ClipboardItem,
   dialog,
   ipcMain,
+  Menu,
   net,
   protocol,
   safeStorage,
+  screen,
   session,
   shell,
 } from 'electron';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { AuthStateDto } from '@swyft/contracts';
+import type { AuthStateDto, MenuCommand, UpdateStatus } from '@swyft/contracts';
+import { autoUpdater } from 'electron-updater';
+import { buildMenuTemplate, shortcutSummary } from './app-menu';
 import { AuthApiClient } from './auth/api-client';
 import { startLoopbackReceiver } from './auth/loopback';
 import { AuthSessionManager } from './auth/session-manager';
@@ -23,9 +27,17 @@ import { resolveApiBaseUrl } from './api-base-url';
 import { BusinessApiClient } from './api/business-api';
 import { createBusinessHandlers } from './ipc/business-handlers';
 import { pickLogoFile } from './logo-file';
+import { UpdateService, updateChannels } from './updates';
+import {
+  minimumWindowSize,
+  placeWindow,
+  snapToPixelGrid,
+  WindowStateFile,
+} from './window-state';
 
 const appHost = 'swyft';
 const appOrigin = `app://${appHost}`;
+const appName = 'Swyft Finance';
 const authChannels = {
   getState: 'auth:get-state:v1',
   signIn: 'auth:sign-in:v1',
@@ -33,6 +45,8 @@ const authChannels = {
   retry: 'auth:retry:v1',
   stateChanged: 'auth:state-changed:v1',
 } as const;
+/** Main → Renderer only; the Renderer can listen but never send on it. */
+const menuCommandChannel = 'menu:command:v1';
 const rendererDirectory = path.join(__dirname, '../renderer');
 
 // Development runs keep their own profile, so a dev session (local API) can never
@@ -53,6 +67,7 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | undefined;
 let authManager: AuthSessionManager | undefined;
+let updateService: UpdateService | undefined;
 
 function publishAuthState(state: AuthStateDto): void {
   mainWindow?.webContents.send(authChannels.stateChanged, state);
@@ -82,6 +97,23 @@ function createAuthManager(apiBaseUrl: string): AuthSessionManager {
     startLoopback: startLoopbackReceiver,
     onStateChanged: publishAuthState,
   });
+}
+
+/**
+ * Automatic updates run only in the installed Windows app: electron-builder writes the
+ * feed address to `resources/app-update.yml` (see `win.publish` in electron-builder.yml).
+ * Development runs and macOS builds (which need an Apple signature to update) never check.
+ */
+function createUpdateService(): UpdateService | undefined {
+  if (
+    !app.isPackaged ||
+    process.platform !== 'win32' ||
+    !existsSync(path.join(process.resourcesPath, 'app-update.yml'))
+  )
+    return undefined;
+  return new UpdateService(autoUpdater, (status: UpdateStatus) =>
+    mainWindow?.webContents.send(updateChannels.status, status),
+  );
 }
 
 function isTrustedRenderer(
@@ -136,14 +168,72 @@ function registerLocalProtocol(): void {
   });
 }
 
+/** Sends a menu command to the app window's UI, if it is open. */
+function sendMenuCommand(command: MenuCommand): void {
+  mainWindow?.webContents.send(menuCommandChannel, command);
+}
+
+function showAbout(): void {
+  void dialog.showMessageBox({
+    type: 'info',
+    title: `About ${appName}`,
+    message: appName,
+    detail: `Version ${app.getVersion()}\nMulti-lender quoting calculator for finance brokers.`,
+    buttons: ['OK'],
+  });
+}
+
+function showShortcuts(): void {
+  const lines = shortcutSummary.map(([keys, action]) => `${keys}\t${action}`);
+  void dialog.showMessageBox({
+    type: 'info',
+    title: 'Keyboard shortcuts',
+    message: 'Keyboard shortcuts',
+    detail: lines.join('\n'),
+    buttons: ['OK'],
+  });
+}
+
+function installApplicationMenu(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      buildMenuTemplate(
+        {
+          packaged: app.isPackaged,
+          mac: process.platform === 'darwin',
+          appName,
+        },
+        { send: sendMenuCommand, showAbout, showShortcuts },
+      ),
+    ),
+  );
+}
+
 function createWindow(): void {
+  // Reopen where the user left the window, if that spot is still on a connected screen.
+  const stateFile = new WindowStateFile(
+    path.join(app.getPath('userData'), 'window-state.json'),
+  );
+  const placed = placeWindow(
+    stateFile.load(),
+    screen.getAllDisplays().map((display) => display.workArea),
+  );
+  const target =
+    placed.x !== undefined && placed.y !== undefined
+      ? screen.getDisplayMatching({
+          x: placed.x,
+          y: placed.y,
+          width: placed.width,
+          height: placed.height,
+        })
+      : screen.getPrimaryDisplay();
+  const placement = snapToPixelGrid(placed, target.scaleFactor);
   const window = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 780,
-    minHeight: 560,
+    width: placement.width,
+    height: placement.height,
+    minWidth: minimumWindowSize.width,
+    minHeight: minimumWindowSize.height,
     show: false,
-    autoHideMenuBar: true,
     backgroundColor: '#f4f7fb',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -153,7 +243,42 @@ function createWindow(): void {
     },
   });
   mainWindow = window;
+  // Positioned with setBounds rather than the constructor: at fractional display scales
+  // the constructor's own rounding still adds a few pixels.
+  if (placement.x !== undefined && placement.y !== undefined)
+    window.setBounds({
+      x: placement.x,
+      y: placement.y,
+      width: placement.width,
+      height: placement.height,
+    });
+  if (placement.maximized) window.maximize();
+  if (placement.fullScreen) window.setFullScreen(true);
   window.once('ready-to-show', () => window.show());
+
+  // Save the normal (not maximized) bounds plus the mode, shortly after the user stops
+  // moving or resizing, and once more when the window closes.
+  const saveState = () =>
+    stateFile.save({
+      bounds: window.getNormalBounds(),
+      maximized: window.isMaximized(),
+      fullScreen: window.isFullScreen(),
+    });
+  let saveTimer: NodeJS.Timeout | undefined;
+  const saveSoon = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveState, 500);
+  };
+  window.on('resize', saveSoon);
+  window.on('move', saveSoon);
+  window.on('maximize', saveSoon);
+  window.on('unmaximize', saveSoon);
+  window.on('enter-full-screen', saveSoon);
+  window.on('leave-full-screen', saveSoon);
+  window.on('close', () => {
+    clearTimeout(saveTimer);
+    saveState();
+  });
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = undefined;
   });
@@ -190,6 +315,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   registerLocalProtocol();
+  installApplicationMenu();
   session.defaultSession.setPermissionRequestHandler(
     (_contents, _permission, callback) => callback(false),
   );
@@ -215,19 +341,20 @@ app.whenReady().then(() => {
   );
   authManager = createAuthManager(apiBaseUrl);
   const manager = authManager;
-  // Auth channels take no arguments: the Renderer can ask, never steer or read tokens.
-  const handleAuth = (channel: string, action: () => unknown) =>
+  // Auth and update channels take no arguments: the Renderer can ask, never steer or
+  // read tokens.
+  const handleNoArgs = (channel: string, action: () => unknown) =>
     ipcMain.handle(channel, (event) => {
       if (!isTrustedRenderer(event.sender, event.senderFrame))
         throw new Error('Untrusted request');
       return action();
     });
-  handleAuth(authChannels.getState, () => manager.getState());
-  handleAuth(authChannels.signIn, () => {
+  handleNoArgs(authChannels.getState, () => manager.getState());
+  handleNoArgs(authChannels.signIn, () => {
     void manager.signIn();
   });
-  handleAuth(authChannels.signOut, () => manager.signOut());
-  handleAuth(authChannels.retry, () => manager.restore());
+  handleNoArgs(authChannels.signOut, () => manager.signOut());
+  handleNoArgs(authChannels.retry, () => manager.restore());
   const businessApi = new BusinessApiClient(
     apiBaseUrl,
     (call) => manager.withAccessToken(call),
@@ -253,8 +380,17 @@ app.whenReady().then(() => {
         throw new Error('Untrusted request');
       return handler(args);
     });
+  updateService = createUpdateService();
+  handleNoArgs(
+    updateChannels.getStatus,
+    (): UpdateStatus => updateService?.status() ?? { state: 'none' },
+  );
+  handleNoArgs(updateChannels.install, () => {
+    updateService?.install();
+  });
   createWindow();
   void manager.restore();
+  updateService?.start();
 });
 
 app.on('window-all-closed', () => app.quit());

@@ -38,6 +38,7 @@ export function ErrorNotice({
   );
 }
 
+/** Placeholder rows while data loads; announced to screen readers by `label`. */
 export function LoadingRows({
   label,
   rows = 3,

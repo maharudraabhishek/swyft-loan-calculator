@@ -1,7 +1,9 @@
 import { Storage } from '@google-cloud/storage';
 
+/** The only image types accepted for lender logos. */
 export type LogoContentType = 'image/png' | 'image/jpeg' | 'image/webp';
 
+/** A logo's bytes and verified image type. */
 export interface StoredLogo {
   readonly bytes: Buffer;
   readonly contentType: LogoContentType;
@@ -14,6 +16,7 @@ export interface LogoStorage {
   delete(key: string): Promise<void>;
 }
 
+/** Largest accepted logo: 512 KB. */
 export const maxLogoBytes = 512 * 1024;
 
 const extensions: Record<LogoContentType, string> = {
@@ -22,6 +25,7 @@ const extensions: Record<LogoContentType, string> = {
   'image/webp': 'webp',
 };
 
+/** File extension used for a stored logo of this type. */
 export function logoExtension(contentType: LogoContentType): string {
   return extensions[contentType];
 }

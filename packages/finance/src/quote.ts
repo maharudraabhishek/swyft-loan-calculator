@@ -1,4 +1,9 @@
 import { Decimal } from './decimal.js';
+import {
+  amortizeDaily,
+  amortizeMonthly,
+  sumInstalments,
+} from './amortization.js';
 import { createDailyRepaymentPlan } from './daily.js';
 import { monthlyPayment, solveAnnualRate } from './math.js';
 import type {
@@ -61,6 +66,13 @@ function validateCommon(input: QuoteInput): void {
   if (input.model === 'autopay' && input.timing === 'advance') {
     throw new RangeError('Autopay daily accrual requires arrears timing');
   }
+  if (
+    input.paymentRounding !== undefined &&
+    input.paymentRounding !== 'cent' &&
+    input.paymentRounding !== 'dollar-up'
+  ) {
+    throw new RangeError('Invalid payment rounding');
+  }
   optionalNonnegative('balloon', input.balloon);
   optionalNonnegative('monthly fee', input.monthlyFee);
   optionalNonnegative('upfront fees', input.upfrontFees);
@@ -77,6 +89,32 @@ function totalHiring(input: QuoteInput, payment: Money): Money {
   ).roundCents();
 }
 
+const isDollarUp = (input: QuoteInput) => input.paymentRounding === 'dollar-up';
+
+/**
+ * The repayment actually charged: the formula payment rounded to the cent, then — for
+ * whole-dollar lenders — up to the next dollar (a payment already in whole dollars
+ * stays as it is).
+ */
+function chargedPayment(payment: Decimal, input: QuoteInput): Money {
+  const cents = Money.from(payment).roundCents();
+  return isDollarUp(input)
+    ? Money.from(cents.decimal().toDecimalPlaces(0, Decimal.ROUND_UP))
+    : cents;
+}
+
+/**
+ * Whole-dollar lenders: total hiring from the instalments actually charged (the last
+ * one is smaller), plus the balloon and the fees paid at settlement.
+ */
+function hiringFromInstalments(input: QuoteInput, paid: Decimal): Money {
+  return Money.from(
+    paid
+      .plus(input.balloon?.decimal() ?? ZERO)
+      .plus(input.upfrontFees?.decimal() ?? ZERO),
+  ).roundCents();
+}
+
 function calculateCapitalised(input: CapitalisedInput): QuoteResult {
   const naf = requireNonnegative('finance amount', input.financeAmount).plus(
     requireNonnegative('financed fees', input.financedFees),
@@ -87,27 +125,47 @@ function calculateCapitalised(input: CapitalisedInput): QuoteResult {
   const funded = naf.plus(commission);
   const balloon = optionalNonnegative('balloon', input.balloon);
   const timing = input.timing ?? 'advance';
+  const baseRate = requireRate('base rate', input.baseRate);
   const payment = monthlyPayment(
     funded,
-    requireRate('base rate', input.baseRate),
+    baseRate,
     input.termMonths,
     balloon,
     timing,
   );
+  const charged = chargedPayment(payment, input);
+  // Comparison rate: the rate on NAF alone that produces the payment. Cent lenders use
+  // the full-precision payment (as the reference calculator does); whole-dollar lenders
+  // use the payment actually charged.
   const effectiveRate = solveAnnualRate(
-    payment,
+    isDollarUp(input) ? charged.decimal() : payment,
     naf,
     input.termMonths,
     balloon,
     timing,
   );
-  const roundedPayment = Money.from(payment).roundCents();
+  let hiring = totalHiring(input, charged);
+  // The reference calculator totals the unrounded PMT, then rounds the display.
+  let totalPaid = payment.mul(input.termMonths);
+  if (isDollarUp(input)) {
+    totalPaid = sumInstalments(
+      amortizeMonthly({
+        startingBalance: funded,
+        monthlyRate: baseRate.div(12),
+        termMonths: input.termMonths,
+        payment: charged.decimal(),
+        balloon,
+        timing,
+      }),
+    );
+    hiring = hiringFromInstalments(input, totalPaid);
+  }
   return {
     model: 'capitalised',
-    monthlyPayment: roundedPayment,
-    totalHiring: totalHiring(input, roundedPayment),
+    monthlyPayment: charged,
+    totalHiring: hiring,
     grossMonthlyPayment: Money.from(
-      roundedPayment
+      charged
         .decimal()
         .plus(optionalNonnegative('monthly fee', input.monthlyFee)),
     ),
@@ -116,9 +174,8 @@ function calculateCapitalised(input: CapitalisedInput): QuoteResult {
     commission: Money.from(commission).roundCents(),
     brokerReceives: Money.from(commission.mul('1.10')).roundCents(),
     effectiveAnnualRate: AnnualRate.from(effectiveRate),
-    // The reference calculator totals the unrounded PMT, then rounds the display.
     totalInterest: Money.from(
-      payment.mul(input.termMonths).plus(balloon).minus(funded),
+      totalPaid.plus(balloon).minus(funded),
     ).roundCents(),
   };
 }
@@ -164,12 +221,30 @@ function calculateBranded(input: BrandedInput): QuoteResult {
     input.baseCommission ?? Money.from('110'),
   );
   const commission = Decimal.max(baseCommission, oversWithGst);
+  // Commission above comes from the formula instalments; a whole-dollar lender only
+  // changes what the customer is charged.
+  const charged = chargedPayment(finalPayment.decimal(), input);
+  const hiring = isDollarUp(input)
+    ? hiringFromInstalments(
+        input,
+        sumInstalments(
+          amortizeMonthly({
+            startingBalance: naf,
+            monthlyRate: contractRate.div(12),
+            termMonths: input.termMonths,
+            payment: charged.decimal(),
+            balloon,
+            timing,
+          }),
+        ),
+      )
+    : totalHiring(input, finalPayment);
   return {
     model: 'branded',
-    monthlyPayment: finalPayment,
-    totalHiring: totalHiring(input, finalPayment),
+    monthlyPayment: charged,
+    totalHiring: hiring,
     grossMonthlyPayment: Money.from(
-      finalPayment
+      charged
         .decimal()
         .plus(optionalNonnegative('monthly fee', input.monthlyFee)),
     ),
@@ -213,20 +288,37 @@ function calculatePepper(input: PepperInput): QuoteResult {
     balloon,
     timing,
   );
+  const charged = chargedPayment(payment, input);
+  // Customer rate: the rate on NAF that produces the payment (whole-dollar lenders: the
+  // payment actually charged). Pepper's schedule amortises NAF at this rate.
   const effectiveRate = solveAnnualRate(
-    payment,
+    isDollarUp(input) ? charged.decimal() : payment,
     naf,
     input.termMonths,
     balloon,
     timing,
   );
-  const roundedPayment = Money.from(payment).roundCents();
+  const hiring = isDollarUp(input)
+    ? hiringFromInstalments(
+        input,
+        sumInstalments(
+          amortizeMonthly({
+            startingBalance: naf,
+            monthlyRate: effectiveRate.div(12),
+            termMonths: input.termMonths,
+            payment: charged.decimal(),
+            balloon,
+            timing,
+          }),
+        ),
+      )
+    : totalHiring(input, charged);
   return {
     model: 'pepper',
-    monthlyPayment: roundedPayment,
-    totalHiring: totalHiring(input, roundedPayment),
+    monthlyPayment: charged,
+    totalHiring: hiring,
     grossMonthlyPayment: Money.from(
-      roundedPayment
+      charged
         .decimal()
         .plus(optionalNonnegative('monthly fee', input.monthlyFee)),
     ),
@@ -278,14 +370,29 @@ function calculateAutopay(input: AutopayInput): QuoteResult {
   if (!firstPeriod) throw new RangeError('A repayment period is required');
   const days = firstPeriod.days;
   const firstInterest = principal.mul(dailyRate).mul(days);
-  const roundedPayment = Money.from(payment).roundCents();
+  const charged = chargedPayment(payment, input);
   const monthlyFee = optionalNonnegative('monthly fee', input.monthlyFee);
   optionalNonnegative('sliding fee', input.slidingFee);
+  const hiring = isDollarUp(input)
+    ? hiringFromInstalments(
+        input,
+        sumInstalments(
+          amortizeDaily({
+            periods,
+            dailyRate,
+            startingBalance: principal,
+            payment: charged.decimal(),
+            balloon,
+            settleFinalInstalment: true,
+          }),
+        ),
+      )
+    : totalHiring(input, charged);
   const commonResult = {
     model: 'autopay',
-    monthlyPayment: roundedPayment,
-    totalHiring: totalHiring(input, roundedPayment),
-    grossMonthlyPayment: Money.from(roundedPayment.decimal().plus(monthlyFee)),
+    monthlyPayment: charged,
+    totalHiring: hiring,
+    grossMonthlyPayment: Money.from(charged.decimal().plus(monthlyFee)),
     netAmountFinanced: Money.from(netAmountFinanced),
     amountFinanced: Money.from(principal),
     effectiveAnnualRate,
@@ -304,7 +411,15 @@ function calculateAutopay(input: AutopayInput): QuoteResult {
   return { ...commonResult, mode: 'contract-terms' };
 }
 
-/** Deterministic lender calculation; inputs are domain objects, not transport DTOs. */
+/**
+ * Calculates one lender quote. The input's `model` picks the commission model:
+ * `capitalised` (Traditional/Westpac/Metro/Firstmac), `branded` (commission overs),
+ * `pepper` (loaded commission) or `autopay` (daily interest with a rate adjustment).
+ *
+ * Pure and deterministic: inputs are validated domain objects (Money, AnnualRate,
+ * Fraction), all arithmetic uses 40-digit decimals, and only the final payment,
+ * commission and totals are rounded to the cent. Invalid inputs throw a RangeError.
+ */
 export function calculateQuote(input: CapitalisedInput): CapitalisedResult;
 export function calculateQuote(input: BrandedInput): BrandedResult;
 export function calculateQuote(input: PepperInput): PepperResult;

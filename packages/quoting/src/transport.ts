@@ -91,6 +91,9 @@ export function feeSignatureFromDto(dto: FeeSignatureDto): FeeSignature {
     monthlyFee: Money.from(dto.monthlyFee),
     slidingFee: Money.from(dto.slidingFee),
     fees,
+    ...(dto.roundPaymentUpToDollar === true && {
+      roundPaymentUpToDollar: true,
+    }),
     ...Object.fromEntries(
       Object.entries(optional).filter(([, value]) => value !== undefined),
     ),
@@ -118,6 +121,7 @@ export interface CalculationSummary {
   readonly totalHiring: string;
 }
 
+/** Formats a calculated quote into the stored/displayed figures (see CalculationSummary). */
 export function summarizeCalculation(
   calculated: CalculatedQuote,
 ): CalculationSummary {

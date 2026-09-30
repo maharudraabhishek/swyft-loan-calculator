@@ -56,6 +56,14 @@ export function bridgeFromHandlers(
         invoke(c.signaturesUpdate, id, definition),
       removeSignature: (id) => invoke(c.signaturesRemove, id),
     },
+    // The native menu and automatic updates live in Main and are not part of these
+    // integration tests.
+    menu: { onCommand: () => () => undefined },
+    updates: {
+      getStatus: async () => ({ state: 'none' }),
+      install: async () => undefined,
+      onStatus: () => () => undefined,
+    },
   };
 }
 

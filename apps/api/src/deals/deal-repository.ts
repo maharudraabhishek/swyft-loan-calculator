@@ -110,6 +110,7 @@ function toQuoteDto(row: QuoteRow): QuoteDto {
   };
 }
 
+/** Position in the deal list: the last row's `updated_at` and ID (keyset pagination). */
 export interface DealCursor {
   readonly updatedAt: string;
   readonly id: string;
@@ -144,6 +145,7 @@ export async function listDeals(
   };
 }
 
+/** One deal with its quote count, or `undefined` (RLS hides other users' deals). */
 export async function findDeal(
   sql: Sql,
   id: string,
@@ -171,6 +173,7 @@ export async function insertDeal(
   return id;
 }
 
+/** Renames the caller's deal. @returns false if it does not exist or is not theirs. */
 export async function renameOwnDeal(
   sql: Sql,
   ownerUserId: string,
@@ -185,6 +188,7 @@ export async function renameOwnDeal(
   return rows.length === 1;
 }
 
+/** Deletes the caller's deal; its quote log and quotes go with it (cascade). */
 export async function deleteOwnDeal(
   sql: Sql,
   ownerUserId: string,
@@ -197,12 +201,14 @@ export async function deleteOwnDeal(
   return rows.length === 1;
 }
 
+/** Marks a deal as recently active so it sorts first in the list. */
 export async function touchDeal(sql: Sql, dealId: string): Promise<void> {
   await sql.query('UPDATE app.deals SET updated_at = now() WHERE id = $1', [
     dealId,
   ]);
 }
 
+/** All quotes in a deal's log, oldest first. */
 export async function listQuotes(
   sql: Sql,
   dealId: string,
@@ -214,6 +220,7 @@ export async function listQuotes(
   return rows.map(toQuoteDto);
 }
 
+/** One quote, or `undefined` (RLS hides other users' quotes). */
 export async function findQuote(
   sql: Sql,
   id: string,
@@ -224,6 +231,10 @@ export async function findQuote(
   return rows[0] && toQuoteDto(rows[0]);
 }
 
+/**
+ * The caller's earlier quote saved with this idempotency key, with the hash of that
+ * request, so a retry can be recognised (same hash) or refused (different hash).
+ */
 export async function findQuoteByIdempotencyKey(
   sql: Sql,
   ownerUserId: string,
@@ -271,6 +282,7 @@ export interface QuoteSnapshot {
   readonly notes: string;
 }
 
+/** Stores a recalculated quote and its immutable snapshot. @returns the new quote ID. */
 export async function insertQuote(
   sql: Sql,
   ownerUserId: string,
@@ -332,6 +344,7 @@ export async function insertQuote(
   return id;
 }
 
+/** Replaces the notes on the caller's quote (the only editable part of a quote). */
 export async function updateOwnQuoteNotes(
   sql: Sql,
   ownerUserId: string,
@@ -346,6 +359,7 @@ export async function updateOwnQuoteNotes(
   return rows.length === 1;
 }
 
+/** Deletes one of the caller's quotes. @returns false if not found. */
 export async function deleteOwnQuote(
   sql: Sql,
   ownerUserId: string,
@@ -358,6 +372,7 @@ export async function deleteOwnQuote(
   return rows.length === 1;
 }
 
+/** Clears a quote log ("Clear all quotes"). @returns how many quotes were deleted. */
 export async function deleteQuotesOfLog(
   sql: Sql,
   ownerUserId: string,

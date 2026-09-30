@@ -1,6 +1,19 @@
 import type { AnnualRate, Fraction, Money } from './value-objects.js';
 
+/**
+ * When instalments fall: `advance` pays the first one at settlement (so the payment is
+ * the arrears payment ÷ (1 + i)); `arrears` pays it one period after settlement.
+ */
 export type PaymentTiming = 'advance' | 'arrears';
+
+/**
+ * How the repayment is rounded (brief, "Rounding Rules"):
+ * - `cent` (default): the formula payment rounded half-up to the cent.
+ * - `dollar-up`: that cent payment rounded up to the next whole dollar, for lenders that
+ *   charge whole-dollar instalments. The final instalment is then reduced so the loan
+ *   closes exactly, and rates and totals are based on the amounts actually charged.
+ */
+export type PaymentRounding = 'cent' | 'dollar-up';
 
 interface CommonInput {
   readonly termMonths: number;
@@ -8,6 +21,7 @@ interface CommonInput {
   readonly balloon?: Money;
   readonly monthlyFee?: Money;
   readonly upfrontFees?: Money;
+  readonly paymentRounding?: PaymentRounding;
 }
 
 /** Commission is capitalised; payment is calculated on NAF plus commission. */
@@ -66,21 +80,37 @@ export interface AutopayOriginationInput extends AutopayCommonInput {
   readonly rateMarkupFactor?: Fraction;
 }
 
+/** Either form of an Autopay/MoneyMe (daily interest) quote. */
 export type AutopayInput = AutopayContractTermsInput | AutopayOriginationInput;
 
+/** Input for any of the four commission models; `model` selects which. */
 export type QuoteInput =
   CapitalisedInput | BrandedInput | PepperInput | AutopayInput;
 
 interface CommonResult {
+  /** The instalment charged, before the monthly account fee (see {@link PaymentRounding}). */
   readonly monthlyPayment: Money;
+  /** Instalment plus the monthly account fee: what the customer pays each month. */
   readonly grossMonthlyPayment: Money;
-  /** Quoted cent PMT × term + balloon + upfront fees; excludes account/sliding fees. */
+  /**
+   * What the customer pays in instalments, balloon and fees paid at settlement:
+   * payment × term + balloon + upfront fees (whole-dollar lenders: the instalments
+   * actually charged, including the smaller final one). Excludes account and sliding
+   * fees, which are shown separately.
+   */
   readonly totalHiring: Money;
+  /** NAF: finance amount plus the fees the customer chose to finance. */
   readonly netAmountFinanced: Money;
+  /** The balance interest is charged on (NAF plus any capitalised commission). */
   readonly amountFinanced: Money;
+  /**
+   * Traditional and Pepper: the comparison (customer) rate, i.e. the rate on NAF alone
+   * that produces the payment. Branded: the contract rate. Autopay: the contract rate.
+   */
   readonly effectiveAnnualRate?: AnnualRate;
 }
 
+/** Traditional capitalised brokerage: commission = % of NAF, added to the loan. */
 export interface CapitalisedResult extends CommonResult {
   readonly model: 'capitalised';
   /** GST is paid by the lender on top of the capitalised, GST-exclusive commission. */
@@ -89,6 +119,7 @@ export interface CapitalisedResult extends CommonResult {
   readonly totalInterest: Money;
 }
 
+/** Commission overs: the broker earns from the contract rate above the base rate. */
 export interface BrandedResult extends CommonResult {
   readonly model: 'branded';
   readonly commission: Money;
@@ -102,6 +133,7 @@ export interface BrandedResult extends CommonResult {
   readonly oversWithGst: Money;
 }
 
+/** Loaded commission: part of the commission (the loading) is added to the loan. */
 export interface PepperResult extends CommonResult {
   readonly model: 'pepper';
   readonly commission: Money;
@@ -115,18 +147,22 @@ interface AutopayCommonResult extends CommonResult {
   readonly firstPaymentDays: number;
 }
 
+/** Autopay quote from stated contract terms (starting principal and rate). */
 export interface AutopayContractTermsResult extends AutopayCommonResult {
   readonly mode: 'contract-terms';
 }
 
+/** Autopay quote originated in the app: rate adjusted and commission capitalised. */
 export interface AutopayOriginationResult extends AutopayCommonResult {
   readonly mode: 'origination';
   readonly commission: Money;
 }
 
+/** Result of either Autopay input form. */
 export type AutopayResult =
   AutopayContractTermsResult | AutopayOriginationResult;
 
+/** Result of {@link calculateQuote}; narrow on `model` for model-specific figures. */
 export type QuoteResult =
   CapitalisedResult | BrandedResult | PepperResult | AutopayResult;
 

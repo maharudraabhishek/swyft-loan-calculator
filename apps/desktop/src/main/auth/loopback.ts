@@ -1,10 +1,12 @@
 import { createServer, type Server } from 'node:http';
 
+/** How the browser hand-off ended: a one-time code, the user cancelled, or it timed out. */
 export type LoopbackResult =
   | { readonly kind: 'code'; readonly code: string }
   | { readonly kind: 'denied' }
   | { readonly kind: 'timeout' };
 
+/** A one-shot local HTTP listener that receives the sign-in result from the browser. */
 export interface LoopbackReceiver {
   /** `http://127.0.0.1:<port>/callback`, registered with the login attempt. */
   readonly redirectUri: string;

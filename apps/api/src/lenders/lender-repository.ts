@@ -26,6 +26,7 @@ interface LenderRow {
   updated_at: Date;
 }
 
+/** A `fee_signatures` row joined with its lender's name. */
 export interface FeeSignatureRow {
   id: string;
   owner_user_id: string | null;
@@ -55,6 +56,7 @@ export interface FeeSignatureRow {
   ppsr_search_financed: boolean | null;
   private_sale_fee: string | null;
   private_sale_financed: boolean | null;
+  round_payment_up_to_dollar: boolean;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -69,13 +71,16 @@ const signatureColumns = `f.id, f.owner_user_id, f.lender_id, l.name AS lender_n
   f.rate_markup_factor, f.monthly_fee, f.sliding_fee, f.max_broker_origination,
   f.establishment_fee, f.establishment_financed, f.establishment_fee_max,
   f.ppsr_registration_fee, f.ppsr_registration_financed, f.ppsr_search_fee, f.ppsr_search_financed,
-  f.private_sale_fee, f.private_sale_financed, f.version, f.created_at, f.updated_at`;
+  f.private_sale_fee, f.private_sale_financed, f.round_payment_up_to_dollar,
+  f.version, f.created_at, f.updated_at`;
 
+/** Where a lender's logo is stored and its image type. */
 export interface LenderLogoRef {
   readonly key: string;
   readonly contentType: string;
 }
 
+/** Maps a lender row to the API shape (logo location is never exposed). */
 export function toLenderDto(row: LenderRow): LenderDto {
   return {
     id: row.id,
@@ -89,6 +94,7 @@ export function toLenderDto(row: LenderRow): LenderDto {
   };
 }
 
+/** Built-in lenders plus the caller's own (RLS), presets first. */
 export async function listLenders(sql: Sql): Promise<LenderDto[]> {
   const rows = await sql.query<LenderRow>(
     `SELECT ${lenderColumns} FROM app.lenders
@@ -97,6 +103,7 @@ export async function listLenders(sql: Sql): Promise<LenderDto[]> {
   return rows.map(toLenderDto);
 }
 
+/** One lender visible to the caller, or `undefined`. */
 export async function findLender(
   sql: Sql,
   id: string,
@@ -108,6 +115,7 @@ export async function findLender(
   return rows[0];
 }
 
+/** Creates one of the caller's own lenders. @returns the new lender ID. */
 export async function insertLender(
   sql: Sql,
   ownerUserId: string,
@@ -123,6 +131,7 @@ export async function insertLender(
   return toLenderDto(row);
 }
 
+/** Renames or changes the website of the caller's lender. @returns false if not found. */
 export async function updateOwnLender(
   sql: Sql,
   ownerUserId: string,
@@ -205,6 +214,7 @@ function fee(
   return max ? { amount, financed, maxAmount: max } : { amount, financed };
 }
 
+/** Maps a stored signature to the API shape. */
 export function toFeeSignatureDto(row: FeeSignatureRow): FeeSignatureDto {
   const establishment = fee(
     row.establishment_fee,
@@ -237,6 +247,9 @@ export function toFeeSignatureDto(row: FeeSignatureRow): FeeSignatureDto {
     monthlyFee: row.monthly_fee,
     slidingFee: row.sliding_fee,
     maxBrokerOrigination: row.max_broker_origination,
+    // Present only when true: app versions released before this field existed parse
+    // responses strictly and would reject an unknown key on every signature.
+    ...(row.round_payment_up_to_dollar && { roundPaymentUpToDollar: true }),
     fees: {
       ...(establishment && { establishment }),
       ...(ppsrRegistration && { ppsrRegistration }),
@@ -308,6 +321,7 @@ export function toFeeSignatureDomain(row: FeeSignatureRow): FeeSignature {
     ...(loadingFactor && { loadingFactor }),
     ...(rateMarkupFactor && { rateMarkupFactor }),
     ...(maxBrokerOrigination && { maxBrokerOrigination }),
+    ...(row.round_payment_up_to_dollar && { roundPaymentUpToDollar: true }),
   };
 }
 
@@ -316,8 +330,10 @@ export function definitionToDomain(
   definition: FeeSignatureDefinitionParsed,
   lenderName: string,
 ): FeeSignature {
+  const columns = definitionColumns(definition);
   return toFeeSignatureDomain({
-    ...definitionColumns(definition),
+    ...columns,
+    round_payment_up_to_dollar: columns.round_payment_up_to_dollar ?? false,
     id: '00000000-0000-4000-8000-000000000000',
     owner_user_id: null,
     lender_name: lenderName,
@@ -359,6 +375,8 @@ function definitionColumns(definition: FeeSignatureDefinitionParsed) {
     ppsr_search_financed: ppsrSearch?.financed ?? null,
     private_sale_fee: privateSale?.amount ?? null,
     private_sale_financed: privateSale?.financed ?? null,
+    // `null` = not sent: a new signature stores false, an update keeps the stored value.
+    round_payment_up_to_dollar: definition.roundPaymentUpToDollar ?? null,
   };
 }
 
@@ -387,6 +405,7 @@ const writableColumns = [
   'ppsr_search_financed',
   'private_sale_fee',
   'private_sale_financed',
+  'round_payment_up_to_dollar',
 ] as const;
 
 type WritableColumns = Record<(typeof writableColumns)[number], unknown>;
@@ -397,6 +416,7 @@ function columnsFromRow(row: FeeSignatureRow): WritableColumns {
   ) as WritableColumns;
 }
 
+/** Built-in signatures plus the caller's own, presets first, then by lender and name. */
 export async function listFeeSignatures(sql: Sql): Promise<FeeSignatureDto[]> {
   const rows = await sql.query<FeeSignatureRow>(
     `SELECT ${signatureColumns} FROM app.fee_signatures f JOIN app.lenders l ON l.id = f.lender_id
@@ -405,6 +425,7 @@ export async function listFeeSignatures(sql: Sql): Promise<FeeSignatureDto[]> {
   return rows.map(toFeeSignatureDto);
 }
 
+/** One signature visible to the caller, or `undefined`. */
 export async function findFeeSignature(
   sql: Sql,
   id: string,
@@ -436,14 +457,20 @@ async function insertColumns(
   return id;
 }
 
+/** Creates the caller's own signature from a full definition. @returns its ID. */
 export function insertFeeSignature(
   sql: Sql,
   ownerUserId: string,
   definition: FeeSignatureDefinitionParsed,
 ): Promise<string> {
-  return insertColumns(sql, ownerUserId, null, definitionColumns(definition));
+  const columns = definitionColumns(definition);
+  return insertColumns(sql, ownerUserId, null, {
+    ...columns,
+    round_payment_up_to_dollar: columns.round_payment_up_to_dollar ?? false,
+  });
 }
 
+/** Creates the caller's own copy of a signature (linked to its source). @returns its ID. */
 export function copyFeeSignature(
   sql: Sql,
   ownerUserId: string,
@@ -456,6 +483,7 @@ export function copyFeeSignature(
   });
 }
 
+/** Replaces the caller's own signature and bumps its version. @returns false if not found. */
 export async function updateOwnFeeSignature(
   sql: Sql,
   ownerUserId: string,
@@ -466,7 +494,14 @@ export async function updateOwnFeeSignature(
   const names = [...writableColumns];
   const rows = await sql.query<{ id: string }>(
     `UPDATE app.fee_signatures
-     SET ${names.map((name, index) => `${name} = $${index + 3}`).join(', ')},
+     SET ${names
+       .map((name, index) =>
+         // Older app versions do not send the rounding flag; keep what is stored.
+         name === 'round_payment_up_to_dollar'
+           ? `${name} = COALESCE($${index + 3}, ${name})`
+           : `${name} = $${index + 3}`,
+       )
+       .join(', ')},
          version = version + 1, updated_at = now()
      WHERE id = $1 AND owner_user_id = $2
      RETURNING id`,
@@ -475,6 +510,7 @@ export async function updateOwnFeeSignature(
   return rows.length === 1;
 }
 
+/** Deletes the caller's own signature; saved quotes keep their snapshot. @returns false if not found. */
 export async function deleteOwnFeeSignature(
   sql: Sql,
   ownerUserId: string,

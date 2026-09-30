@@ -331,6 +331,8 @@ interface EditorValues {
   monthlyFee: string;
   defaultCommission: string;
   maxCommission: string;
+  /** Lender charges whole-dollar instalments (cent payment rounded up). */
+  roundPaymentUpToDollar: boolean;
   fees: Partial<Record<LenderFeeKind, { amount: string; financed: boolean }>>;
 }
 
@@ -353,6 +355,7 @@ function editorValues(signature: FeeSignatureDto): EditorValues {
       signature.maxCommissionRate === null
         ? ''
         : fractionToPercent(signature.maxCommissionRate),
+    roundPaymentUpToDollar: signature.roundPaymentUpToDollar === true,
     fees,
   };
 }
@@ -405,6 +408,12 @@ function toDefinition(
     monthlyFee: values.monthlyFee.trim().replace(/[$,]/g, '') || '0',
     slidingFee: signature.slidingFee,
     maxBrokerOrigination: signature.maxBrokerOrigination,
+    // Sent only when it is on or being switched off, so ordinary edits also work
+    // against an API that predates the field (it rejects unknown keys).
+    ...((values.roundPaymentUpToDollar ||
+      signature.roundPaymentUpToDollar === true) && {
+      roundPaymentUpToDollar: values.roundPaymentUpToDollar,
+    }),
     fees,
   };
   const parsed = feeSignatureDefinitionSchema.safeParse(candidate);
@@ -588,6 +597,20 @@ function SignatureEditor({
             </div>
           );
         })}
+      </div>
+      <div className="toggle-list">
+        <Checkbox
+          label="Round repayments up to the whole dollar"
+          checked={values.roundPaymentUpToDollar}
+          onChange={(roundPaymentUpToDollar) =>
+            setValues({ ...values, roundPaymentUpToDollar })
+          }
+        />
+        <p className="hint">
+          For lenders that charge whole-dollar instalments: the repayment is
+          rounded up to the next dollar and the final instalment is reduced so
+          the loan closes exactly. Commission is unchanged.
+        </p>
       </div>
       {failure && <ErrorNotice error={failure} context="Not saved." />}
       <div className="form-actions">

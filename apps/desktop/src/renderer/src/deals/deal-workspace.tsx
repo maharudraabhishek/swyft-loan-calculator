@@ -142,10 +142,10 @@ export function DealWorkspace({
 
   const tabs: ReadonlyArray<readonly [Tab, string]> = [
     ['build', 'Quote builder'],
-    ['saved', deal ? `Saved quotes (${knownCount})` : 'Saved quotes'],
+    ['saved', deal ? `Quote log (${knownCount})` : 'Quote log'],
     ['email', 'Client email'],
   ];
-  // Saved quotes and the client email belong to a deal's quote log.
+  // The quote log and the client email belong to a deal.
   const available = (id: Tab) => id === 'build' || deal !== undefined;
 
   return (
@@ -207,7 +207,7 @@ export function DealWorkspace({
             role="tab"
             type="button"
             aria-selected={tab === id}
-            // Only the selected tab's panel is rendered for Saved quotes / Client email.
+            // Only the selected tab's panel is rendered for Quote log / Client email.
             aria-controls={tab === id ? `panel-${id}` : undefined}
             tabIndex={tab === id ? 0 : -1}
             className="tab"
@@ -270,7 +270,7 @@ export function DealWorkspace({
                 context={
                   resource.data
                     ? 'Showing the last loaded quotes; they may be out of date.'
-                    : 'Saved quotes could not be loaded.'
+                    : 'The quote log could not be loaded.'
                 }
                 onRetry={reload}
               />
@@ -307,7 +307,7 @@ export function DealWorkspace({
                           aria-pressed={layout === 'list'}
                           onClick={() => setLayout('list')}
                         >
-                          Quote log
+                          Table
                         </button>
                         <button
                           type="button"

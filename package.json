@@ -18,6 +18,7 @@
     "api:start": "pnpm --filter @swyft/api start",
     "desktop:dev": "pnpm --filter @swyft/desktop dev",
     "desktop:package:win": "pnpm --filter @swyft/desktop package:win",
+    "desktop:package:mac": "pnpm --filter @swyft/desktop package:mac",
     "test:db": "docker compose up -d --wait postgres-test && pnpm --filter @swyft/api test:db",
     "db:up": "docker compose up -d --wait postgres",
     "test:integration": "docker compose up -d --wait postgres-test && pnpm --filter @swyft/desktop test:integration"

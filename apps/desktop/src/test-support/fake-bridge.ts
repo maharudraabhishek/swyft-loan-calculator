@@ -6,9 +6,11 @@ import type {
   DealDto,
   DesktopBridge,
   FeeSignatureDto,
+  MenuCommand,
   QuoteCreateDto,
   QuoteDto,
   QuoteExportRequestDto,
+  UpdateStatus,
 } from '@swyft/contracts';
 import { vi } from 'vitest';
 import { previewQuote, targetCommission } from '../main/quote-preview';
@@ -54,6 +56,9 @@ export function createFakeBridge(
     `${prefix}1111111-1111-4111-8111-${String(++sequence).padStart(12, '0')}`;
 
   const saveKeys: string[] = [];
+  const menuListeners = new Set<(command: MenuCommand) => void>();
+  const updateListeners = new Set<(status: UpdateStatus) => void>();
+  let updateStatus: UpdateStatus = { state: 'none' };
   const exports: QuoteExportRequestDto[] = [];
 
   function serverQuote(dealId: string, request: QuoteCreateDto): QuoteDto {
@@ -295,6 +300,24 @@ export function createFakeBridge(
         }),
       ),
     },
+    menu: {
+      onCommand: vi.fn((listener: (command: MenuCommand) => void) => {
+        menuListeners.add(listener);
+        return () => {
+          menuListeners.delete(listener);
+        };
+      }),
+    },
+    updates: {
+      getStatus: vi.fn(async () => updateStatus),
+      install: vi.fn(async () => undefined),
+      onStatus: vi.fn((listener: (status: UpdateStatus) => void) => {
+        updateListeners.add(listener);
+        return () => {
+          updateListeners.delete(listener);
+        };
+      }),
+    },
   } satisfies DesktopBridge;
 
   return {
@@ -304,6 +327,15 @@ export function createFakeBridge(
     exports,
     failNext(operation: string, failure: ApiFailure) {
       failures.set(operation, failure);
+    },
+    /** Fires an application-menu command, as Main does on a menu click or shortcut. */
+    sendMenuCommand(command: MenuCommand) {
+      for (const listener of menuListeners) listener(command);
+    },
+    /** Reports a downloaded update, as Main does when electron-updater finishes. */
+    updateReady(version: string) {
+      updateStatus = { state: 'ready', version };
+      for (const listener of updateListeners) listener(updateStatus);
     },
   };
 }

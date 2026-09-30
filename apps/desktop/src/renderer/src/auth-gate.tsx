@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { AuthStateDto, DesktopAuthBridge } from '@swyft/contracts';
 
+/** The screens the gate can show; only `app` renders the product. */
 export type AuthView = 'loading' | 'sign-in' | 'offline' | 'app';
 
 /** Which screen to show. Anything but a live session shows only sign-in or status. */
@@ -37,6 +38,7 @@ function useAuthState(
   return state;
 }
 
+/** The signed-in user handed to the product. */
 export interface SessionUser {
   readonly email: string;
   readonly displayName: string | null;
