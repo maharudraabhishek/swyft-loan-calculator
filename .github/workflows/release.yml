@@ -12,6 +12,7 @@
 #   GCP_RELEASE_SERVICE_ACCOUNT     service account allowed to create objects in the bucket
 #   GCP_RELEASE_BUCKET              bucket name, without gs://
 name: Release
+run-name: ${{ github.event_name == 'push' && format('Release {0}', github.ref_name) || format('Test build from {0} (no upload)', github.ref_name) }}
 
 on:
   push:
@@ -130,3 +131,69 @@ jobs:
           # Public objects are cached for an hour by default; the manifest must not be.
           headers: |-
             cache-control: no-cache
+
+      - name: List the files on the run page
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.name }}"
+            if compgen -G "release/*.sha256" > /dev/null; then
+              echo "| File | Size (bytes) | SHA-256 |"
+              echo "| --- | --- | --- |"
+              for checksum in release/*.sha256; do
+                file=$(basename "${checksum%.sha256}")
+                echo "| \`$file\` | $(wc -c < "release/$file" | tr -d ' ') | \`$(cut -d' ' -f1 "$checksum")\` |"
+              done
+            else
+              echo "No installer was built. See the job log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Short documentation on every run's summary page: what the workflow does and how to run it.
+  about:
+    name: About this workflow
+    needs: package
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Write the run summary
+        shell: bash
+        env:
+          UPLOADED: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.package.result == 'success' }}
+          BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Release workflow
+
+          Builds the Swyft Finance desktop installers. For a version tag it also publishes them to Google Cloud Storage.
+
+          **What it does**
+
+          1. Builds the Windows installer (NSIS, x64) and the macOS disk images (Apple Silicon and Intel).
+          2. On a `vX.Y.Z` tag: checks the tag matches the version in `apps/desktop/package.json`, then uploads each file with a `.sha256` to `desktop/<tag>/` in the release bucket.
+          3. Publishes the Windows update feed (`desktop/updates/win/latest.yml`), which installed Windows apps check for new versions.
+
+          **How to run it**
+
+          - Release: set `version` in `apps/desktop/package.json`, merge to `master`, deploy the API first if the release needs API changes, then tag the merged commit and push the tag, e.g. `git tag -a v1.2.0 -m "Swyft Finance 1.2.0"` and `git push origin v1.2.0`.
+          - Test build: Actions → Release → Run workflow. It builds everything but uploads nothing.
+
+          EOF
+          version="${GITHUB_REF_NAME#v}"
+          base="https://storage.googleapis.com/$BUCKET/desktop/$GITHUB_REF_NAME"
+          {
+            echo "**This run**"
+            echo
+            if [ "$UPLOADED" = "true" ]; then
+              echo "- Windows: [Swyft-Finance-$version-x64-Setup.exe]($base/Swyft-Finance-$version-x64-Setup.exe)"
+              echo "- macOS Apple Silicon: [Swyft-Finance-$version-arm64.dmg]($base/Swyft-Finance-$version-arm64.dmg)"
+              echo "- macOS Intel: [Swyft-Finance-$version-x64.dmg]($base/Swyft-Finance-$version-x64.dmg)"
+              echo "- Checksums: the same links with \`.sha256\` added. Sizes and SHA-256 values are in the Windows and macOS sections on this page."
+            elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+              echo "The build or upload failed, so this release may be incomplete. Check the failed job, fix it, then re-run the failed jobs."
+            else
+              echo "Test build from \`$GITHUB_REF_NAME\`: nothing was uploaded."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
