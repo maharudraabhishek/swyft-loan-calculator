@@ -1,6 +1,11 @@
-# Every push to master and every pull request: the same checks as `pnpm verify`.
-# Linux runs everything that needs PostgreSQL (Docker); Windows runs the desktop tests
-# on the platform the app ships for. Nothing is uploaded, so no artifact storage is used.
+# CI
+#
+# Checks every push to master and every pull request with the same checks as
+# `pnpm verify`: format, lint, typecheck, build and all the tests. Linux runs everything
+# that needs PostgreSQL (in Docker); Windows runs the desktop tests, since that's the
+# platform the app ships for. It doesn't build installers or upload anything.
+#
+# How to run: it runs on its own. To re-run it, open the run and use "Re-run jobs".
 name: CI
 
 on:

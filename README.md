@@ -59,7 +59,7 @@ Key principles:
 - **Database:** row-level security on every table. The runtime role owns nothing and cannot bypass RLS; PostgreSQL resolves the user from the request's token hash.
 - **Secrets:** database passwords and the Identity Platform key live in Secret Manager and are read only by Cloud Run. The installer contains no secrets; its only configuration is the public API origin.
 - **Logos:** uploads go app → API → private bucket (PNG, JPEG or WebP, checked by file signature, up to 512 KB). The app holds no cloud credentials.
-- **Updates:** the installed Windows app reads `latest.yml` over HTTPS from the public release bucket and only installs a file whose SHA-512 matches it. Only the release workflow can write to the bucket (and only for a version tag from this repo), and `latest.yml` is the only file it can overwrite. The installers aren't code-signed, so there's no publisher check.
+- **Updates:** the installed Windows app reads `latest.yml` over HTTPS from the public release bucket and only installs a file whose SHA-512 matches it. Only this repo's workflows running on `master` can write to the bucket, and `latest.yml` is the only file they can overwrite. The installers aren't code-signed, so there's no publisher check.
 
 ```mermaid
 sequenceDiagram
@@ -262,19 +262,29 @@ node scripts/check-finance.mjs               # finance tests, allowing only the 
 
 Installers are written to `apps/desktop/dist/`. `pnpm verify` runs every check. Right now it only fails on the five official test cases covered at the end of _Known limitations_.
 
-### Continuous integration and releases
+### CI/CD
 
-GitHub Actions only builds and tests. Installers go to Google Cloud Storage.
+GitHub Actions runs the checks and builds the installers. The installers are stored in the release bucket on Google Cloud Storage, not on GitHub.
 
-- **CI** (`.github/workflows/ci.yml`, on every push to `master` and every pull request) runs the `pnpm verify` checks on Linux, with the database and real-stack tests against PostgreSQL in Docker, and the desktop tests on Windows. Finance goes through `scripts/check-finance.mjs`, which passes only if everything else passes and the five known official cases fail with exactly the values listed under _Known limitations_.
-- **Release** (`.github/workflows/release.yml`) can run three ways:
-  - **Build**: Actions → Release → Run workflow with action `build`, on `master`. It builds the Windows installer and both macOS disk images and uploads them to `desktop/builds/<run number>/` so you can test them. The run page lists the download links. Builds from other branches upload nothing.
-  - **Release a tested build**: Run workflow with action `release`, the build's run number and its version. It publishes that exact build, without rebuilding, to `desktop/v<version>/`, updates the Windows update feed and tags the build's commit `v<version>` (a plain tag, so the commit's author is the only name on it).
-  - **Tag**: push a `vX.Y.Z` tag that matches `apps/desktop/package.json`, and it builds from that commit and publishes it in one go.
+| Workflow                       | When it runs                            | What it does                                                                                                                                    |
+| ------------------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CI**                         | Every pull request and push to `master` | Format, lint, typecheck, build and all the tests. No installers.                                                                                |
+| **Build installers**           | By hand, on `master`                    | Builds the Windows installer and both Mac images into `desktop/builds/<build number>/`. The run page has the download links and the tag to use. |
+| **Release**                    | By hand, with a build number            | Publishes that build to `desktop/v<version>/` and updates the Windows update feed. It doesn't build or tag anything.                            |
+| **Build installers: clean up** | By hand                                 | Deletes test builds older than 7, 30 or 90 days, or all of them. It's a dry run unless you untick it, and it never touches releases.            |
 
-  Uploads go straight from the runner to the bucket, signed in with GitHub's short-lived OIDC token (Workload Identity Federation), so there's no cloud key stored in GitHub. The service account can add files but can't replace or delete them, apart from the update feed's `latest.yml`. Each run's summary page explains the workflow and lists that run's download links and checksums.
+To release a new version:
 
-- **Automatic updates** (installed Windows app): the app checks the feed at start-up and every 6 hours and downloads a new version in the background. It then shows a _Restart and update_ notice; if you don't restart, the update installs the next time the app closes. If the app is offline it just tries again at the next check. Development runs and macOS builds never check (macOS updates need an Apple signature).
+1. Bump `version` in `apps/desktop/package.json` and merge to `master`. If the release depends on API changes, deploy the API first.
+2. Run **Build installers** (Actions → Build installers → Run workflow) and test the installers linked on its run page.
+3. Tag the build's commit and push the tag. The run page has the command, e.g. `git tag -a v1.2.0 <commit> -m "Swyft Finance 1.2.0"` then `git push origin v1.2.0`.
+4. Run **Release** with that build number.
+
+Release won't copy anything unless the build is complete, the tag points at the build's commit and the version is newer than the one installed apps are offered now. It then checks the copies match the build before it updates the feed. If it fails part way, run it again with the same build and it carries on. Pushing a tag on its own doesn't start anything.
+
+The workflows sign in to Google Cloud with GitHub's short-lived OIDC token (Workload Identity Federation), so there's no cloud key stored in GitHub. Uploaded files can't be overwritten; the only file that ever changes is the update feed's `latest.yml`.
+
+Installed Windows apps check the feed at start-up and every 6 hours, download a new version in the background and show a _Restart and update_ notice. If you don't restart, the update installs the next time the app closes. Development runs and macOS builds don't check (macOS updates need an Apple signature).
 
 Testing approach:
 

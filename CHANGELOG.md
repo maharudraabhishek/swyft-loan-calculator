@@ -4,7 +4,11 @@
 
 ### Added
 
-- Release workflow: build on `master` for testing (installers uploaded to `desktop/builds/<run number>/` with links on the run page), then release that exact build as a version without rebuilding. Each run's page explains the workflow and lists its download links and checksums.
+- CI/CD split into clear steps: **Build installers** makes test builds with download links on the run page, **Release** publishes a build you choose (no rebuild, you create the tag) and **Build installers: clean up** deletes old test builds. See CI/CD in the README.
+
+### Changed
+
+- Pushing a version tag no longer builds or publishes anything. Releases go through Build installers and Release.
 
 ### Fixed
 

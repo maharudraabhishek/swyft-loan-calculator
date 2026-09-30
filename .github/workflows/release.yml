@@ -1,349 +1,175 @@
-# Builds the desktop installers and publishes releases to the release bucket in Google
-# Cloud Storage. No GitHub artifact storage is used. The runner signs in to Google Cloud
-# with GitHub's short-lived OIDC token (Workload Identity Federation), so no key is stored
-# in GitHub.
+# Release
 #
-# Three ways to run it:
-#   1. Build (Actions → Release → Run workflow, action "build", on master): builds the
-#      Windows installer and both macOS disk images and uploads them to
-#      desktop/builds/<run number>/ for testing. Builds from other branches upload nothing.
-#   2. Release a tested build (Run workflow, action "release", with the build's run number
-#      and version): publishes that exact build, without rebuilding, to desktop/v<version>/,
-#      updates the Windows update feed (desktop/updates/win/) and tags the build's commit.
-#   3. Push a version tag (vX.Y.Z): builds from the tagged commit and publishes it in one go.
+# Publishes a build made by the Build installers workflow. It doesn't build anything and it
+# doesn't create tags: you pick the build, you create the tag, and this copies that build's
+# files to the release folder and updates the Windows update feed.
 #
-# Repository variables (Settings → Secrets and variables → Actions → Variables):
-#   GCP_WORKLOAD_IDENTITY_PROVIDER  projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
-#   GCP_RELEASE_SERVICE_ACCOUNT     service account that uploads to the bucket
-#   GCP_RELEASE_BUCKET              bucket name, without gs://
+#   gs://<bucket>/desktop/v<version>/     installers and .sha256 files (download links)
+#   gs://<bucket>/desktop/updates/win/    installer, blockmap and latest.yml (auto-update feed)
+#
+# How to run:
+#   1. Run Build installers on master and test the installers from its run page.
+#   2. Tag that build's commit with its version and push the tag (the build page has the
+#      command), e.g. git tag -a v1.2.0 <commit> -m "Swyft Finance 1.2.0".
+#   3. Actions → Release → Run workflow (branch: master), enter the build number.
+#
+# Before copying anything it checks that the build is complete, that the tag exists and
+# points at the build's commit, and that the version is newer than the one installed apps
+# are offered now. The update feed is written last, so apps only see the new version once
+# everything else is in place. If a release fails part way, running it again finishes it.
+# Only one release runs at a time.
 name: Release
-run-name: >-
-  ${{ github.event_name == 'push' && format('Release {0}', github.ref_name)
-  || inputs.action == 'release' && format('Release v{0} from build #{1}', inputs.version, inputs.build)
-  || format('Build #{0} from {1}', github.run_number, github.ref_name) }}
+run-name: 'Release build #${{ inputs.build }}'
 
 on:
-  push:
-    tags: ['v*.*.*']
   workflow_dispatch:
     inputs:
-      action:
-        description: 'build: build the installers (on master they are uploaded for testing). release: publish a tested build.'
-        type: choice
-        options: [build, release]
-        default: build
       build:
-        description: 'For release: the run number of the build to publish (the # in its run title)'
-        required: false
-      version:
-        description: 'For release: the version to publish, e.g. 1.2.0 (must match apps/desktop/package.json)'
-        required: false
+        description: 'Build number to release (the # in the Build installers run title)'
+        required: true
 
 permissions:
   contents: read
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  package:
-    name: Package (${{ matrix.name }})
-    if: github.event_name == 'push' || inputs.action == 'build'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows
-            os: windows-2025
-            script: desktop:package:win
-            pattern: '*.exe'
-          - name: macOS
-            os: macos-15
-            script: desktop:package:mac
-            pattern: '*.dmg'
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      id-token: write # lets google-github-actions/auth request the OIDC token
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    env:
-      # A version tag publishes the release; a build on master uploads for testing.
-      TAG_RELEASE: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-      UPLOAD_TO: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && format('desktop/{0}', github.ref_name) || github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && format('desktop/builds/{0}', github.run_number) || '' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0 (version from packageManager)
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-
-      - name: Read the app version
-        id: version
-        shell: bash
-        run: echo "version=$(node -p "require('./apps/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
-      - name: Check the tag matches the app version
-        if: env.TAG_RELEASE == 'true'
-        shell: bash
-        run: |
-          if [ "v${{ steps.version.outputs.version }}" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match apps/desktop/package.json version ${{ steps.version.outputs.version }}"
-            exit 1
-          fi
-
-      # Builds against the public API origin in apps/desktop/.env.production.
-      - run: pnpm run ${{ matrix.script }}
-
-      - name: Collect installers and SHA-256 checksums
-        shell: bash
-        run: |
-          mkdir release
-          cp apps/desktop/dist/${{ matrix.pattern }} release/
-          cd release
-          for file in *; do
-            if command -v sha256sum > /dev/null; then
-              sha256sum "$file" > "$file.sha256"
-            else
-              shasum -a 256 "$file" > "$file.sha256"
-            fi
-          done
-          ls -l
-          cat ./*.sha256
-
-      # Windows update feed files: the blockmap (for smaller downloads) and latest.yml,
-      # which installed apps read to find a new version.
-      - name: Collect the update feed
-        if: matrix.name == 'Windows'
-        shell: bash
-        run: |
-          mkdir -p feed/files feed/manifest
-          cp apps/desktop/dist/*.exe apps/desktop/dist/*.exe.blockmap feed/files/
-          cp apps/desktop/dist/latest.yml feed/manifest/
-          grep -q "^version: ${{ steps.version.outputs.version }}$" feed/manifest/latest.yml
-          cat feed/manifest/latest.yml
-
-      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        if: env.UPLOAD_TO != ''
-        with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_RELEASE_SERVICE_ACCOUNT }}
-      # The service account can create objects but not replace or delete them, so an
-      # uploaded installer can never be overwritten. The one exception is the update
-      # feed's latest.yml, which each release replaces.
-      - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3.0.0
-        if: env.UPLOAD_TO != ''
-        with:
-          path: release
-          destination: ${{ vars.GCP_RELEASE_BUCKET }}/${{ env.UPLOAD_TO }}
-          parent: false
-          gzip: false
-          process_gcloudignore: false
-
-      # Build for testing: keep the feed files and a note of the version and commit next
-      # to the installers, so "release" can publish this exact build later.
-      - name: Collect the build details
-        if: env.UPLOAD_TO != '' && env.TAG_RELEASE != 'true' && matrix.name == 'Windows'
-        shell: bash
-        run: |
-          mkdir extra
-          cp feed/files/*.blockmap feed/manifest/latest.yml extra/
-          printf '{"version":"%s","commit":"%s","run":%s}\n' "${{ steps.version.outputs.version }}" "$GITHUB_SHA" "$GITHUB_RUN_NUMBER" > extra/build.json
-          cat extra/build.json
-      - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3.0.0
-        if: env.UPLOAD_TO != '' && env.TAG_RELEASE != 'true' && matrix.name == 'Windows'
-        with:
-          path: extra
-          destination: ${{ vars.GCP_RELEASE_BUCKET }}/${{ env.UPLOAD_TO }}
-          parent: false
-          gzip: false
-          process_gcloudignore: false
-
-      # Tag release: publish the Windows update feed. Installer and blockmap first,
-      # latest.yml last, so an app never reads a latest.yml whose installer isn't there yet.
-      - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3.0.0
-        if: env.TAG_RELEASE == 'true' && matrix.name == 'Windows'
-        with:
-          path: feed/files
-          destination: ${{ vars.GCP_RELEASE_BUCKET }}/desktop/updates/win
-          parent: false
-          gzip: false
-          process_gcloudignore: false
-      - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3.0.0
-        if: env.TAG_RELEASE == 'true' && matrix.name == 'Windows'
-        with:
-          path: feed/manifest
-          destination: ${{ vars.GCP_RELEASE_BUCKET }}/desktop/updates/win
-          parent: false
-          gzip: false
-          process_gcloudignore: false
-          # Public objects are cached for an hour by default; the manifest must not be.
-          headers: |-
-            cache-control: no-cache
-
-      - name: List the files on the run page
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "### ${{ matrix.name }}"
-            if compgen -G "release/*.sha256" > /dev/null; then
-              echo "| File | Size (bytes) | SHA-256 |"
-              echo "| --- | --- | --- |"
-              for checksum in release/*.sha256; do
-                file=$(basename "${checksum%.sha256}")
-                echo "| \`$file\` | $(wc -c < "release/$file" | tr -d ' ') | \`$(cut -d' ' -f1 "$checksum")\` |"
-              done
-            else
-              echo "No installer was built. See the job log."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # Publishes a build made earlier with action "build", without rebuilding, so the files
-  # released are exactly the ones that were tested.
-  promote:
-    name: Release a tested build
-    if: github.event_name == 'workflow_dispatch' && inputs.action == 'release'
+  release:
+    name: Release
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
-      contents: write # creates the version tag
-      id-token: write
+      contents: read
+      id-token: write # for the Google Cloud sign-in
     env:
       BUILD: ${{ inputs.build }}
-      VERSION: ${{ inputs.version }}
       BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # all tags
           persist-credentials: false
 
-      - name: Check the build and the version
+      - name: Check the build, the tag and the version
         shell: bash
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
-          [ "$GITHUB_REF" = "refs/heads/master" ] || fail "Run the release from master."
-          [[ "$BUILD" =~ ^[0-9]+$ ]] || fail "Enter the build's run number, e.g. 12."
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Enter a version like 1.2.0."
-          base="https://storage.googleapis.com/$BUCKET/desktop/builds/$BUILD"
-          curl -sfL "$base/build.json" -o build.json || fail "Build #$BUILD is not in the bucket. Run the workflow with action 'build' on master first."
-          cat build.json; echo
-          built=$(jq -r .version build.json)
+          newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+
+          [ "$GITHUB_REF" = "refs/heads/master" ] || fail "Run Release from master."
+          [[ "$BUILD" =~ ^[0-9]+$ ]] || fail "The build number should be a number, e.g. 12."
+
+          public="https://storage.googleapis.com/$BUCKET/desktop"
+          curl -sfL "$public/builds/$BUILD/build.json" -o build.json \
+            || fail "Build #$BUILD isn't in the bucket (never built, failed, or cleaned up)."
+          version=$(jq -r .version build.json)
           commit=$(jq -r .commit build.json)
-          [ "$built" = "$VERSION" ] || fail "Build #$BUILD is version $built, not $VERSION."
-          git merge-base --is-ancestor "$commit" origin/master || fail "Build #$BUILD's commit $commit is not on master."
-          in_repo=$(git show "$commit:apps/desktop/package.json" | jq -r .version)
-          [ "$in_repo" = "$VERSION" ] || fail "apps/desktop/package.json at $commit says $in_repo, not $VERSION."
-          # fetch-depth 0 brings every tag, so this checks the remote's tags too.
-          if git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then
-            fail "Tag v$VERSION already exists."
-          fi
-          if curl -sfI "https://storage.googleapis.com/$BUCKET/desktop/v$VERSION/Swyft-Finance-$VERSION-x64-Setup.exe" > /dev/null; then
-            fail "desktop/v$VERSION is already published."
-          fi
-          name="Swyft-Finance-$VERSION"
+          echo "Build #$BUILD: version $version, commit $commit"
+
+          name="Swyft-Finance-$version"
           for file in "$name-x64-Setup.exe" "$name-x64-Setup.exe.sha256" "$name-x64-Setup.exe.blockmap" \
             "$name-arm64.dmg" "$name-arm64.dmg.sha256" "$name-x64.dmg" "$name-x64.dmg.sha256" latest.yml; do
-            curl -sfI "$base/$file" > /dev/null || fail "Build #$BUILD is missing $file. Did both build jobs succeed?"
+            curl -sfI "$public/builds/$BUILD/$file" > /dev/null \
+              || fail "Build #$BUILD is missing $file. Only builds where both platforms succeeded can be released."
           done
-          echo "COMMIT=$commit" >> "$GITHUB_ENV"
+
+          tagged=$(git rev-parse -q --verify "refs/tags/v$version^{commit}") \
+            || fail "Tag v$version doesn't exist. Create it on $commit and push it first (see the build's run page)."
+          [ "$tagged" = "$commit" ] || fail "Tag v$version points at $tagged, but build #$BUILD was made from $commit."
+
+          # The last release is whatever the update feed currently offers installed apps.
+          live=$(curl -sf "$public/updates/win/latest.yml?check=$GITHUB_RUN_ID" | sed -n 's/^version: //p' || true)
+          [ "$live" != "$version" ] || fail "v$version is already released."
+          if [ -n "$live" ] && ! newer "$version" "$live"; then
+            fail "Version $version isn't newer than the current release, $live."
+          fi
+
+          { echo "VERSION=$version"; echo "COMMIT=$commit"; } >> "$GITHUB_ENV"
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_RELEASE_SERVICE_ACCOUNT }}
 
-      # Server-side copies within the bucket. The update feed goes last, latest.yml last of all.
-      - name: Publish the build
+      # Files already in the release folder are left alone (a re-run after a failed release
+      # picks up where it stopped); the next step checks every file matches the build.
+      - name: Copy the build to the release folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="Swyft-Finance-$VERSION"
+          for file in "$name-x64-Setup.exe" "$name-x64-Setup.exe.sha256" "$name-arm64.dmg" \
+            "$name-arm64.dmg.sha256" "$name-x64.dmg" "$name-x64.dmg.sha256"; do
+            if curl -sfI "https://storage.googleapis.com/$BUCKET/desktop/v$VERSION/$file" > /dev/null; then
+              echo "$file is already in the release folder"
+            else
+              gcloud storage cp "gs://$BUCKET/desktop/builds/$BUILD/$file" "gs://$BUCKET/desktop/v$VERSION/$file"
+            fi
+          done
+
+      # Compares the stored MD5 and CRC32C of each released file with the build's, so the
+      # released files are the same bytes that were tested.
+      - name: Check the release matches the build
+        shell: bash
+        run: |
+          set -euo pipefail
+          meta() { curl -sf "https://storage.googleapis.com/storage/v1/b/$BUCKET/o/$(jq -rn --arg p "$1" '$p|@uri')" | jq -r '.md5Hash + " " + .crc32c' || true; }
+          name="Swyft-Finance-$VERSION"
+          for file in "$name-x64-Setup.exe" "$name-x64-Setup.exe.sha256" "$name-arm64.dmg" \
+            "$name-arm64.dmg.sha256" "$name-x64.dmg" "$name-x64.dmg.sha256"; do
+            built=$(meta "desktop/builds/$BUILD/$file")
+            released=$(meta "desktop/v$VERSION/$file")
+            if [ -z "$built" ] || [ "$built" != "$released" ]; then
+              echo "::error::$file in the release folder doesn't match build #$BUILD."
+              exit 1
+            fi
+            echo "$file matches the build ($released)"
+          done
+
+      # Installer and blockmap first, latest.yml last. latest.yml is what installed apps read,
+      # and it's served without caching so they see the new version straight away.
+      - name: Update the Windows update feed
         shell: bash
         run: |
           set -euo pipefail
           src="gs://$BUCKET/desktop/builds/$BUILD"
-          name="Swyft-Finance-$VERSION"
-          gcloud storage cp \
-            "$src/$name-x64-Setup.exe" "$src/$name-x64-Setup.exe.sha256" \
-            "$src/$name-arm64.dmg" "$src/$name-arm64.dmg.sha256" \
-            "$src/$name-x64.dmg" "$src/$name-x64.dmg.sha256" \
-            "gs://$BUCKET/desktop/v$VERSION/"
-          gcloud storage cp "$src/$name-x64-Setup.exe" "$src/$name-x64-Setup.exe.blockmap" "gs://$BUCKET/desktop/updates/win/"
-          gcloud storage cp --cache-control=no-cache "$src/latest.yml" "gs://$BUCKET/desktop/updates/win/latest.yml"
+          feed="gs://$BUCKET/desktop/updates/win"
+          for file in "Swyft-Finance-$VERSION-x64-Setup.exe" "Swyft-Finance-$VERSION-x64-Setup.exe.blockmap"; do
+            if curl -sfI "https://storage.googleapis.com/$BUCKET/desktop/updates/win/$file" > /dev/null; then
+              echo "$file is already in the update feed"
+            else
+              gcloud storage cp "$src/$file" "$feed/$file"
+            fi
+          done
+          gcloud storage cp --cache-control=no-cache "$src/latest.yml" "$feed/latest.yml"
+          curl -sf "https://storage.googleapis.com/$BUCKET/desktop/updates/win/latest.yml?check=$GITHUB_RUN_ID" | grep -qx "version: $VERSION" \
+            || { echo "::error::The update feed doesn't show version $VERSION."; exit 1; }
 
-      # A plain tag (no tagger), so the commit's author stays the only name on it. A tag
-      # created with the workflow's token does not start another run of this workflow.
-      - name: Tag the build's commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$COMMIT"
-
-  # Short documentation on every run's summary page, plus this run's download links.
-  about:
-    name: About this workflow
-    needs: [package, promote]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
       - name: Write the run summary
+        if: always()
         shell: bash
         env:
-          ACTION: ${{ inputs.action }}
-          PACKAGE: ${{ needs.package.result }}
-          PROMOTE: ${{ needs.promote.result }}
-          BUILT_VERSION: ${{ needs.package.outputs.version }}
-          BUILD: ${{ inputs.build }}
-          VERSION: ${{ inputs.version }}
-          BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
+          STATUS: ${{ job.status }}
         run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          ## Release workflow
-
-          Builds the Swyft Finance desktop installers and publishes releases to Google Cloud Storage.
-
-          **Three ways to run it**
-
-          - **Build**: Actions → Release → Run workflow, action `build`, on `master`. Builds the Windows installer and both macOS disk images and uploads them to `desktop/builds/<run number>/` so you can test them. Builds from other branches are not uploaded.
-          - **Release a tested build**: Run workflow, action `release`, with the build's run number and its version. Publishes that exact build (no rebuild) to `desktop/v<version>/`, updates the Windows update feed and tags the build's commit `v<version>`.
-          - **Tag**: `git tag -a v1.2.0 -m "Swyft Finance 1.2.0"` then `git push origin v1.2.0`. Builds from the tagged commit and publishes it in one go.
-
-          Before a release: set `version` in `apps/desktop/package.json`, merge to `master`, and deploy the API first if the release needs API changes. The version is checked against `package.json`.
-
-          EOF
-          links() {
-            local base="https://storage.googleapis.com/$BUCKET/$1" v="$2"
-            echo "- Windows: [Swyft-Finance-$v-x64-Setup.exe]($base/Swyft-Finance-$v-x64-Setup.exe)"
-            echo "- macOS Apple Silicon: [Swyft-Finance-$v-arm64.dmg]($base/Swyft-Finance-$v-arm64.dmg)"
-            echo "- macOS Intel: [Swyft-Finance-$v-x64.dmg]($base/Swyft-Finance-$v-x64.dmg)"
-            echo "- Checksums: the same links with \`.sha256\` added."
-          }
           {
-            echo "**This run**"
+            echo "## Release"
             echo
-            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-              if [ "$PACKAGE" = "success" ]; then
-                links "desktop/$GITHUB_REF_NAME" "${GITHUB_REF_NAME#v}"
-              else
-                echo "The build or upload failed, so this release may be incomplete. Check the failed job, fix it, then re-run the failed jobs."
-              fi
-            elif [ "$ACTION" = "release" ]; then
-              if [ "$PROMOTE" = "success" ]; then
-                echo "Released build #$BUILD as \`v$VERSION\`."
-                echo
-                links "desktop/v$VERSION" "$VERSION"
-              else
-                echo "The release failed. The job log says why."
-              fi
-            elif [ "$GITHUB_REF" != "refs/heads/master" ]; then
-              echo "Test build from \`$GITHUB_REF_NAME\`: only builds on \`master\` are uploaded, so there is nothing to download."
-            elif [ "$PACKAGE" = "success" ]; then
-              echo "Build #$GITHUB_RUN_NUMBER (version $BUILT_VERSION), for testing:"
+            echo "Publishes a tested build from **Build installers**. It doesn't build or tag anything."
+            echo
+            if [ "$STATUS" = "success" ]; then
+              base="https://storage.googleapis.com/$BUCKET/desktop/v$VERSION"
+              echo "**Released build #$BUILD as v$VERSION** (commit \`${COMMIT:0:7}\`)"
               echo
-              links "desktop/builds/$GITHUB_RUN_NUMBER" "$BUILT_VERSION"
+              echo "- Windows: [Swyft-Finance-$VERSION-x64-Setup.exe]($base/Swyft-Finance-$VERSION-x64-Setup.exe)"
+              echo "- macOS Apple Silicon: [Swyft-Finance-$VERSION-arm64.dmg]($base/Swyft-Finance-$VERSION-arm64.dmg)"
+              echo "- macOS Intel: [Swyft-Finance-$VERSION-x64.dmg]($base/Swyft-Finance-$VERSION-x64.dmg)"
+              echo "- Checksums: add \`.sha256\` to a link."
               echo
-              echo "To publish it: Run workflow, action \`release\`, build \`$GITHUB_RUN_NUMBER\`, version \`$BUILT_VERSION\`."
+              echo "Installed Windows apps offer the update at their next check (at start-up, then every 6 hours)."
             else
-              echo "The build failed, so it can't be released. Check the failed job."
+              echo "Build #$BUILD wasn't released. The failed step says why. Installed apps still get the previous version, because the update feed is only changed at the very end. Fix the problem and run Release again with the same build; it carries on from where it stopped."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
