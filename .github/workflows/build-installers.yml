@@ -1,52 +1,85 @@
 # Build installers
 #
-# Builds the Windows installer and the two macOS disk images (Apple Silicon and Intel)
-# from master and stores them in the release bucket under a build number:
+# Builds the Windows installer and the two macOS disk images (Apple Silicon and Intel) from
+# master, with the version you type in, and stores them in the release bucket:
 #
 #   gs://<bucket>/desktop/builds/<build number>/
 #
-# Use it to get installers for testing. It doesn't publish anything: when a build is good,
-# tag its commit and run the Release workflow with its build number. The run page has the
-# download links, the checksums and the tag command for that build.
+# Nothing is published. Test the installers from the run page, then publish a GitHub
+# release with the tag v<version> and the Release workflow does the rest.
 #
-# How to run: Actions → Build installers → Run workflow (branch: master).
+# How to run: Actions → Build installers → Run workflow (branch: master), enter the version,
+# e.g. 1.1.1. It has to be higher than the version installed apps are on now.
 #
-# Uploads use GitHub's short-lived OIDC token (Workload Identity Federation), so there's no
-# cloud key in GitHub. The bucket and service account come from the repository variables
-# GCP_RELEASE_BUCKET, GCP_RELEASE_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER.
+# The version is set here, at build time; apps/desktop/package.json only matters for local
+# builds. Uploads use GitHub's short-lived OIDC token (Workload Identity Federation), so
+# there's no cloud key in GitHub. The bucket and service account come from the repository
+# variables GCP_RELEASE_BUCKET, GCP_RELEASE_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER.
 name: Build installers
-run-name: 'Build #${{ github.run_number }} from ${{ github.ref_name }}'
+run-name: 'Build #${{ github.run_number }}: v${{ inputs.version }}'
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, e.g. 1.1.1 (higher than the current release)'
+        required: true
 
 permissions:
   contents: read
 
 jobs:
+  # Checks the version before spending time on the builds.
+  check:
+    name: Check the version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    env:
+      VERSION: ${{ inputs.version }}
+      BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
+    steps:
+      - name: Check the version
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+          [ "$GITHUB_REF" = "refs/heads/master" ] || fail "Run Build installers on master."
+          VERSION="${VERSION#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "The version should look like 1.1.1."
+          # The current release is the version the update feed offers installed apps.
+          live=$(curl -sf "https://storage.googleapis.com/$BUCKET/desktop/updates/win/latest.yml?check=$GITHUB_RUN_ID" | sed -n 's/^version: //p' || true)
+          if [ -n "$live" ] && ! newer "$VERSION" "$live"; then
+            fail "Version $VERSION isn't higher than the current release, $live."
+          fi
+          echo "Building $VERSION (current release: ${live:-none})"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
   package:
     name: Package (${{ matrix.name }})
-    if: github.ref == 'refs/heads/master'
+    needs: check
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Windows
             os: windows-2025
-            script: desktop:package:win
+            target: --win nsis
             pattern: '*.exe'
           - name: macOS
             os: macos-15
-            script: desktop:package:mac
+            target: --mac
             pattern: '*.dmg'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
       contents: read
       id-token: write # for the Google Cloud sign-in
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     env:
+      VERSION: ${{ needs.check.outputs.version }}
       DESTINATION: ${{ vars.GCP_RELEASE_BUCKET }}/desktop/builds/${{ github.run_number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -59,13 +92,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Read the app version
-        id: version
+      # electron-vite uses the public API origin in apps/desktop/.env.production. The version
+      # goes into the app (About, auto-update), the file names and latest.yml.
+      - name: Build the installers
         shell: bash
-        run: echo "version=$(node -p "require('./apps/desktop/package.json').version")" >> "$GITHUB_OUTPUT"
-
-      # Uses the public API origin in apps/desktop/.env.production.
-      - run: pnpm run ${{ matrix.script }}
+        working-directory: apps/desktop
+        run: |
+          pnpm run build
+          pnpm exec electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.version="$VERSION"
 
       - name: Collect the installers and their checksums
         shell: bash
@@ -89,9 +123,8 @@ jobs:
         shell: bash
         run: |
           cp apps/desktop/dist/*.exe.blockmap apps/desktop/dist/latest.yml out/
-          grep -q "^version: ${{ steps.version.outputs.version }}$" out/latest.yml
-          printf '{"version":"%s","commit":"%s","build":%s}\n' \
-            "${{ steps.version.outputs.version }}" "$GITHUB_SHA" "$GITHUB_RUN_NUMBER" > out/build.json
+          grep -qx "version: $VERSION" out/latest.yml
+          printf '{"version":"%s","commit":"%s","build":%s}\n' "$VERSION" "$GITHUB_SHA" "$GITHUB_RUN_NUMBER" > out/build.json
           cat out/build.json
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
@@ -126,7 +159,7 @@ jobs:
 
   summary:
     name: Summary
-    needs: package
+    needs: [check, package]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -134,27 +167,24 @@ jobs:
       - name: Write the run summary
         shell: bash
         env:
+          CHECK: ${{ needs.check.result }}
           RESULT: ${{ needs.package.result }}
-          VERSION: ${{ needs.package.outputs.version }}
+          VERSION: ${{ needs.check.outputs.version }}
           BUCKET: ${{ vars.GCP_RELEASE_BUCKET }}
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           ## Build installers
 
-          Builds the installers from `master` for testing. Nothing is published. When a build is good, tag its commit and run **Release** with its build number.
+          Builds the installers from `master` for testing. Nothing is published until you publish a GitHub release for the version.
 
           EOF
           {
-            if [ "$GITHUB_REF" != "refs/heads/master" ]; then
-              echo "This was run on \`$GITHUB_REF_NAME\`. Builds only run on \`master\`, so nothing was built. Run it again with branch \`master\`."
+            if [ "$CHECK" != "success" ]; then
+              echo "Nothing was built: the version check failed. The **Check the version** job says why."
             elif [ "$RESULT" != "success" ]; then
               echo "The build failed, so it can't be released. Check the failed job and run it again."
             else
               base="https://storage.googleapis.com/$BUCKET/desktop/builds/$GITHUB_RUN_NUMBER"
-              # The last release is the version the update feed offers installed apps now.
-              last=$(curl -sf "https://storage.googleapis.com/$BUCKET/desktop/updates/win/latest.yml?check=$GITHUB_RUN_ID" | sed -n 's/^version: //p' || true)
-              # newer A B: true if version A is higher than version B.
-              newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
               echo "**Build #$GITHUB_RUN_NUMBER**: version $VERSION, commit \`${GITHUB_SHA:0:7}\`"
               echo
               echo "- Windows: [Swyft-Finance-$VERSION-x64-Setup.exe]($base/Swyft-Finance-$VERSION-x64-Setup.exe)"
@@ -162,21 +192,13 @@ jobs:
               echo "- macOS Intel: [Swyft-Finance-$VERSION-x64.dmg]($base/Swyft-Finance-$VERSION-x64.dmg)"
               echo "- Checksums: add \`.sha256\` to a link. They're also listed per platform below."
               echo
-              echo "**To release this build**"
+              echo "**To release it**, once you've tested it:"
               echo
-              echo "Last release: ${last:+v$last}${last:-none}."
-              if [ -n "$last" ] && ! newer "$VERSION" "$last"; then
-                echo
-                echo "> Version $VERSION isn't newer than v$last. Bump \`version\` in \`apps/desktop/package.json\`, merge, and build again."
-              else
-                echo
-                echo "1. Tag the commit (suggested tag \`v$VERSION\`, from \`apps/desktop/package.json\`):"
-                echo
-                echo '   ```'
-                echo "   git tag -a v$VERSION $GITHUB_SHA -m \"Swyft Finance $VERSION\""
-                echo "   git push origin v$VERSION"
-                echo '   ```'
-                echo "2. Run **Release** with build \`$GITHUB_RUN_NUMBER\`."
-              fi
+              echo "1. Go to **Releases → Draft a new release**."
+              echo "2. Tag: type \`v$VERSION\` and choose to create it on publish. Target: \`master\`."
+              echo "3. Click **Generate release notes** (edit them if you like), then **Publish release**."
+              echo
+              echo "Publishing starts the **Release** workflow, which publishes this build and updates installed apps."
+              echo "If anything has been merged to \`master\` since this build (commit \`${GITHUB_SHA:0:7}\`), build again first: Release only publishes a build of the commit the tag is on."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

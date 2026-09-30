@@ -4,11 +4,12 @@
 
 ### Added
 
-- CI/CD split into clear steps: **Build installers** makes test builds with download links on the run page, **Release** publishes a build you choose (no rebuild, you create the tag) and **Build installers: clean up** deletes old test builds. See CI/CD in the README.
+- CI/CD in three workflows. **Build installers** builds a version you enter and links the installers on the run page. Publishing a GitHub release runs **Release**, which publishes that tested build, updates installed Windows apps and adds the download links to the release notes. **Build installers: clean up** deletes old test builds. See CI/CD in the README.
 
 ### Changed
 
-- Pushing a version tag no longer builds or publishes anything. Releases go through Build installers and Release.
+- The version of a release is set when you run Build installers, so `apps/desktop/package.json` no longer needs editing to release.
+- Pushing a tag no longer builds anything. Releases come from a published GitHub release (or Release run by hand for a tag).
 
 ### Fixed
 
