@@ -262,6 +262,16 @@ node scripts/check-finance.mjs               # finance tests, allowing only the 
 
 Installers are written to `apps/desktop/dist/`. `pnpm verify` runs every check. Right now it only fails on the five official test cases covered at the end of _Known limitations_.
 
+Testing approach:
+
+- **Unit:** the engine, including the brief's formulas and worked example line by line (`brief-math-spec.test.ts`).
+- **Cross-checks:** SPG's four HTML calculators run unmodified over an input grid (`spg-calculators-grid.test.ts`).
+- **Fixtures:** the official test cases and lender schedules.
+- **Integration:**
+  - API tests against real PostgreSQL with RLS
+  - a real-stack suite driving the desktop UI and Main code against the real API
+- **Packaged app:** smoke, sign-in and end-to-end workflow scripts in `apps/desktop/scripts`, run against the installed build.
+
 ### CI/CD
 
 GitHub Actions runs the checks and builds the installers. The installers live in the release bucket on Google Cloud Storage, not on GitHub.
@@ -273,41 +283,46 @@ GitHub Actions runs the checks and builds the installers. The installers live in
 | **Release**                    | When you publish a GitHub release       | Publishes the tested build of that version, updates the Windows update feed and adds the download links to the release notes. It doesn't build or tag. |
 | **Build installers: clean up** | By hand                                 | Deletes test builds older than 7, 30 or 90 days, or all of them. It's a dry run unless you untick it, and it never touches releases.                   |
 
-#### How to release
+The workflows sign in to Google Cloud with GitHub's short-lived OIDC token (Workload Identity Federation), so there's no cloud key stored in GitHub. Uploaded files can't be overwritten; the only file that ever changes is the update feed's `latest.yml`.
 
-The usual way, all on GitHub:
+Installed Windows apps check the feed at start-up and every 6 hours, download a new version in the background and show a _Restart and update_ notice. If you don't restart, the update installs the next time the app closes. Development runs and macOS builds don't check (macOS updates need an Apple signature).
+
+## How to release
+
+There are two ways. Use the first one: it's the only one that updates installed apps and the download links.
+
+### With GitHub Actions
 
 1. **Build.** Actions → **Build installers** → Run workflow (branch `master`). Enter the new version, e.g. `1.1.1`. It has to be higher than the current release.
 2. **Test.** Download the installers from the run page and try them.
 3. **Publish.** Releases → **Draft a new release**. Type the tag `v1.1.1` and let GitHub create it on publish, with target `master`. Click **Generate release notes**, edit them if you want, then **Publish release**.
 
-Publishing starts the **Release** workflow. In a minute or two the installers are in `desktop/v1.1.1/`, the download links and checksums are added to your release notes, and installed Windows apps offer the update. You don't run anything else.
+Publishing starts the **Release** workflow. In a minute or two the installers are in `desktop/v1.1.1/`, the download links and checksums are added to your release notes, and installed Windows apps offer the update. There's nothing else to run.
 
 Things to know:
 
 - Release publishes the build made from the commit the tag points at. If something was merged to `master` after you built, build again before you publish.
-- If the release needs API changes, deploy the API before you publish.
-- A draft doesn't start anything, and neither does a pre-release (untick _Set as a pre-release_).
-- You don't edit `apps/desktop/package.json` to release. The version comes from step 1; `package.json` only matters for local builds.
+- If the release needs API changes, deploy the API first.
+- A draft doesn't start anything, and a pre-release is refused (untick _Set as a pre-release_).
+- You don't edit `apps/desktop/package.json`. The version comes from step 1.
 
-#### Running Release by hand
+### If a release fails
 
-Actions → **Release** → Run workflow (branch `master`) and enter the tag, e.g. `v1.1.1`. Use this to:
+Open the failed **Release** run. The error says what to fix, for example no build of that version, or something merged after the build. Fix it, then go to Actions → **Release** → Run workflow (branch `master`) and enter the tag, e.g. `v1.1.1`. It carries on from where it stopped and doesn't duplicate anything. Until it succeeds, installed apps stay on the previous version.
 
-- **retry** a release that failed. Fix what the error said, then run it again. It carries on from where it stopped and doesn't duplicate anything;
-- **release a tag you pushed from git** without making a release page. It creates the page, with generated notes and the download links.
+The same works for a tag you pushed from git without a release page: it creates the page.
 
-Either way it checks the same things before copying anything: there's a complete build of that version from the tag's commit, and the version is higher than the current release. The copies are checked against the build before installed apps are told about them.
+### By hand, without GitHub Actions
 
-Testing approach:
+This is how 1.0.0 went out. You get a GitHub release with the Windows installer attached, but installed apps aren't told about it and the download links in the bucket don't change, so only use it if Actions isn't available.
 
-- **Unit:** the engine, including the brief's formulas and worked example line by line (`brief-math-spec.test.ts`).
-- **Cross-checks:** SPG's four HTML calculators run unmodified over an input grid (`spg-calculators-grid.test.ts`).
-- **Fixtures:** the official test cases and lender schedules.
-- **Integration:**
-  - API tests against real PostgreSQL with RLS
-  - a real-stack suite driving the desktop UI and Main code against the real API
-- **Packaged app:** smoke, sign-in and end-to-end workflow scripts in `apps/desktop/scripts`, run against the installed build.
+1. Set `version` in `apps/desktop/package.json` (e.g. `1.1.1`), merge to `master` and pull it.
+2. On a Windows PC, run `pnpm install`, then `pnpm desktop:package:win`. The installer is written to `apps/desktop/dist/Swyft-Finance-1.1.1-x64-Setup.exe`. The Mac images need a Mac: `pnpm desktop:package:mac`.
+3. Install it and test it.
+4. Get its SHA-256 in PowerShell: `Get-FileHash apps\desktop\dist\Swyft-Finance-1.1.1-x64-Setup.exe`.
+5. Releases → **Draft a new release**: tag `v1.1.1`, target `master`, write the notes (include the SHA-256), attach the installer, then **Publish release**.
+
+Because the installer is attached, the Release workflow knows the release was made by hand and leaves it alone.
 
 ## Finance validation
 

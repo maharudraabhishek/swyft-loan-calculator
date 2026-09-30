@@ -4,7 +4,8 @@
 
 ### Added
 
-- CI/CD in three workflows. **Build installers** builds a version you enter and links the installers on the run page. Publishing a GitHub release runs **Release**, which publishes that tested build, updates installed Windows apps and adds the download links to the release notes. **Build installers: clean up** deletes old test builds. See CI/CD in the README.
+- CI/CD in three workflows. **Build installers** builds a version you enter and links the installers on the run page. Publishing a GitHub release runs **Release**, which publishes that tested build, updates installed Windows apps and adds the download links to the release notes. **Build installers: clean up** deletes old test builds. See _How to release_ in the README.
+- A release with installers attached (released by hand) is left alone by the Release workflow.
 
 ### Changed
 

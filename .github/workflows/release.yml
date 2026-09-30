@@ -19,6 +19,9 @@
 # tag's commit, if the version isn't higher than the current release, or if the release is
 # marked as a pre-release. Running it again is safe: it finishes a release that stopped part
 # way and refreshes the download links. Only one release runs at a time.
+#
+# A release with installers attached was released by hand (see "How to release" in the
+# README), so when one is published this workflow leaves it alone.
 name: Release
 run-name: 'Release ${{ github.event.release.tag_name || inputs.tag }}'
 
@@ -58,6 +61,8 @@ jobs:
 
       - name: Find the build and check the version
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
@@ -65,6 +70,16 @@ jobs:
 
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$GITHUB_REF" != "refs/heads/master" ]; then
             fail "Run Release from master."
+          fi
+          # Installers attached to the release mean it was released by hand: leave it alone.
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            attached=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length') \
+              || fail "Couldn't read release $TAG from GitHub. Run Release again by hand with $TAG."
+            if [ "$attached" -gt 0 ]; then
+              echo "::notice::$TAG has files attached, so it was released by hand. Nothing to do."
+              echo "SKIP=true" >> "$GITHUB_ENV"
+              exit 0
+            fi
           fi
           [ "$PRERELEASE" != "true" ] || fail "$TAG is marked as a pre-release. Pre-releases aren't sent to installed apps; untick it to release."
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "The tag should look like v1.1.1, not $TAG."
@@ -114,6 +129,7 @@ jobs:
           { echo "VERSION=$version"; echo "COMMIT=$commit"; echo "BUILD=$build"; } >> "$GITHUB_ENV"
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        if: env.SKIP != 'true'
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_RELEASE_SERVICE_ACCOUNT }}
@@ -121,6 +137,7 @@ jobs:
       # Files already in the release folder are left alone (a re-run after a failed release
       # picks up where it stopped); the next step checks every file matches the build.
       - name: Copy the build to the release folder
+        if: env.SKIP != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -137,6 +154,7 @@ jobs:
       # Compares the stored MD5 and CRC32C of each released file with the build's, so the
       # released files are the same bytes that were tested.
       - name: Check the release matches the build
+        if: env.SKIP != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -156,6 +174,7 @@ jobs:
       # Installer and blockmap first, latest.yml last. latest.yml is what installed apps read,
       # and it's served without caching so they see the new version straight away.
       - name: Update the Windows update feed
+        if: env.SKIP != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -176,6 +195,7 @@ jobs:
       # hidden marker, so a re-run replaces it instead of adding a second one. With no release
       # page yet (run by hand after pushing a tag), it creates one with generated notes.
       - name: Add the downloads to the release notes
+        if: env.SKIP != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -217,7 +237,9 @@ jobs:
             echo
             echo "Publishes a tested build when a GitHub release is published. It doesn't build or tag anything."
             echo
-            if [ "$STATUS" = "success" ]; then
+            if [ "${SKIP:-}" = "true" ]; then
+              echo "$TAG has files attached, so it was released by hand. This workflow didn't change anything: no download folder, and installed apps aren't told about it."
+            elif [ "$STATUS" = "success" ]; then
               base="https://storage.googleapis.com/$BUCKET/desktop/v$VERSION"
               echo "**Released $TAG** from build #$BUILD (commit \`${COMMIT:0:7}\`)"
               echo
