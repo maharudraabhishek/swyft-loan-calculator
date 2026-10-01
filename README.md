@@ -83,6 +83,64 @@ sequenceDiagram
   App->>App: Store the refresh token with safeStorage
 ```
 
+### Where tokens, sessions and secrets live
+
+```mermaid
+flowchart TB
+  subgraph PC["User's computer"]
+    subgraph APP["Electron app"]
+      R["Renderer: React UI<br/>sandboxed, no Node<br/>CSP connect-src 'none'<br/>never holds a token"]
+      P["Preload<br/>window.swyft named functions<br/>no raw ipcRenderer"]
+      M["Main process<br/>in memory: access token 15 min,<br/>refresh token, PKCE verifier<br/>checks IPC sender, validates with zod"]
+    end
+    L["Loopback listener<br/>127.0.0.1, random port<br/>one-shot, state checked"]
+    D[("session.bin<br/>refresh token only<br/>encrypted with safeStorage<br/>bound to the API origin")]
+    K["OS key store<br/>Windows Data Protection API<br/>macOS Keychain"]
+    B["System browser<br/>HttpOnly __Host- login cookie<br/>attempt id + browser secret, 10 min"]
+  end
+
+  subgraph CLOUD["Google Cloud"]
+    IDP["Identity Platform<br/>holds the Google OAuth client secret"]
+    API["Cloud Run API, stateless<br/>verifies the Google ID token<br/>keeps only SHA-256 token hashes<br/>auth hook on every business route"]
+    SM["Secret Manager<br/>database passwords<br/>Identity Platform key"]
+    subgraph SQL["Cloud SQL PostgreSQL"]
+      AUTH[("auth schema<br/>login attempts, sessions, refresh tokens<br/>hashes only, SECURITY DEFINER functions only")]
+      DATA[("app schema<br/>row-level security on every table<br/>user resolved from the token hash")]
+    end
+    LOGO[("Logo bucket<br/>private, API identity only")]
+    REL[("Release bucket<br/>installers, latest.yml")]
+  end
+
+  GH["GitHub Actions<br/>Workload Identity Federation<br/>no stored cloud keys"]
+
+  R -- "IPC request" --> P --> M
+  M -- "1 · open sign-in with PKCE challenge + state" --> B
+  B <-->|"3 · user signs in with Google"| IDP
+  B -- "2 · start sign-in, 4 · callback with the cookie" --> API
+  API -- "5 · single-use code, redirected via the browser" --> L
+  L -- "6 · code + state" --> M
+  M -- "7 · code + PKCE verifier for tokens, then HTTPS + bearer token" --> API
+  M <-->|"8 · refresh token encrypted at rest"| D
+  D -. "key protected by" .-> K
+  API -- "hashes only, via functions" --> AUTH
+  API -- "token hash per transaction, RLS" --> DATA
+  API -- "service identity" --> LOGO
+  SM -. "injected at runtime" .-> API
+  GH -. "uploads installers" .-> REL
+  REL -. "update feed, SHA-512 checked" .-> M
+```
+
+1. Main creates a Proof Key for Code Exchange (PKCE) verifier and a random `state`, starts the loopback listener and opens the system browser at the API.
+2. The API saves the login attempt (the PKCE challenge and a hash of a browser secret) and sets an HttpOnly cookie, so only the browser that started sign-in can finish it.
+3. The user signs in with Google through Identity Platform. The app never sees the Google password.
+4. Google returns the browser to the API's callback. The API checks the cookie and verifies Google's ID token.
+5. The API redirects the browser to the loopback listener with a single-use code, stored only as a hash and valid for 2 minutes.
+6. The listener checks `state` and hands the code to Main.
+7. Main swaps the code and its PKCE verifier for an access token (15 minutes) and a refresh token. Every later request sends the access token as a bearer token. The API runs each request in a transaction that passes the token hash to PostgreSQL, where row-level security returns only that user's rows.
+8. The refresh token is the only credential on disk, in `session.bin`, encrypted with Electron `safeStorage` (the Windows Data Protection API on Windows, the Keychain on macOS). It rotates on every refresh, and reusing an old one revokes the whole session.
+
+Secrets never ship in the app. Database passwords and the Identity Platform key come from Secret Manager at runtime, Google's OAuth client secret stays inside Identity Platform, and GitHub Actions uploads releases through Workload Identity Federation instead of stored cloud keys. The installer's only backend setting is the public API address.
+
 ## Database
 
 PostgreSQL 17 on Cloud SQL, in three schemas:
