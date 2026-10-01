@@ -6,6 +6,24 @@ The app is built with Electron and React. It talks to a small API on Google Clou
 
 **Download (1.1.0):** [Windows 10/11 x64](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-x64-Setup.exe) (not code-signed, so on first run choose _More info → Run anyway_) or macOS [Apple Silicon](https://storage.googleapis.com/swyft-stage2-releases/desktop/v1.1.0/Swyft-Finance-1.1.0-arm64.dmg) (see _Known limitations_). Each file has a `.sha256` next to it. 1.0.0 is still on the [GitHub release](https://github.com/maharudraabhishek/swyft-loan-calculator/releases/tag/v1.0.0). From 1.1.0 onwards the Windows app updates itself.
 
+## Screenshots
+
+<p align="center">
+  <a href="assets/screenshots/01-quote-builder.png"><img src="assets/screenshots/01-quote-builder.png" width="32%" alt="Quote builder with the live preview and repayment schedule"></a>
+  <a href="assets/screenshots/02-quote-log.png"><img src="assets/screenshots/02-quote-log.png" width="32%" alt="Quote log of a deal with four lenders"></a>
+  <a href="assets/screenshots/03-compare.png"><img src="assets/screenshots/03-compare.png" width="32%" alt="Side-by-side comparison of the deal's quotes"></a>
+  <br>
+  <sub>Quote builder and repayment schedule · Quote log · Side-by-side comparison</sub>
+</p>
+
+<p align="center">
+  <a href="assets/screenshots/04-client-email.png"><img src="assets/screenshots/04-client-email.png" width="32%" alt="Client email preview with commissions hidden"></a>
+  <a href="assets/screenshots/05-daily-interest.png"><img src="assets/screenshots/05-daily-interest.png" width="32%" alt="Daily-interest lender with the target commission solver"></a>
+  <a href="assets/screenshots/06-lender-library.png"><img src="assets/screenshots/06-lender-library.png" width="32%" alt="Lender library with a custom fee signature"></a>
+  <br>
+  <sub>Client email · Daily-interest lender and target commission · Lender library</sub>
+</p>
+
 ## Architecture
 
 ```mermaid
