@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { loadConfig, ConfigurationError } from '../../src/config.js';
 import { createApplication } from '../../src/composition.js';
 import { Database } from '../../src/db/database.js';
@@ -84,6 +84,40 @@ describe('HTTP boundary', () => {
   it('reports not-ready when the database is unreachable', async () => {
     const response = await app.inject({ method: 'GET', url: '/ready' });
     expect(response.statusCode).toBe(503);
+  });
+
+  it('shares one database check between readiness probes for a second', async () => {
+    const probed = new Database({
+      host: '127.0.0.1',
+      port: 1,
+      database: 'unused',
+      user: 'unused',
+      password: 'unused',
+      max: 1,
+      ssl: false,
+    });
+    const ping = vi.spyOn(probed, 'ping').mockResolvedValue();
+    const { app: probedApp } = createApplication(loadConfig(baseEnvironment), {
+      database: probed,
+    });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const ready = () => probedApp.inject({ method: 'GET', url: '/ready' });
+      const burst = await Promise.all(Array.from({ length: 5 }, ready));
+      expect(burst.map((response) => response.statusCode)).toEqual([
+        200, 200, 200, 200, 200,
+      ]);
+      expect((await ready()).statusCode).toBe(200);
+      expect(ping).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1_000);
+      ping.mockRejectedValue(new Error('down'));
+      expect((await ready()).statusCode).toBe(503);
+      expect(ping).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      await probedApp.close();
+      await probed.close();
+    }
   });
 
   it('returns a safe 404 envelope that does not echo the URL', async () => {

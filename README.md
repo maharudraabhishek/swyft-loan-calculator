@@ -74,6 +74,7 @@ Key principles:
 - **Sign-in:** Google sign-in opens in the user's normal browser. The API completes the OAuth flow and returns a single-use code to the app over a loopback redirect protected with PKCE and `state` (flow below).
 - **Sessions:** the API issues opaque tokens. Access tokens last 15 minutes and are held in Main's memory only. The rotating refresh token is stored with `safeStorage` (DPAPI on Windows), bound to the API origin and deleted on sign-out. Reusing a refresh token revokes the whole session, and the server stores only token hashes.
 - **API:** every non-public route requires a valid session (a test enumerates the route table and checks each route for 401), request bodies use strict schemas, and other users' records return 404.
+- **Rate limits:** sign-in routes are limited per IP. Signed-in routes are limited per account (requests, writes and logo transfers each have their own budget). An IP that keeps sending unknown tokens is refused before the database is touched. Limits return 429 with `Retry-After`, and Cloud Run's 3-instance cap bounds compute cost.
 - **Database:** row-level security on every table. The runtime role owns nothing and cannot bypass RLS; PostgreSQL resolves the user from the request's token hash.
 - **Secrets:** database passwords and the Identity Platform key live in Secret Manager and are read only by Cloud Run. The installer contains no secrets; its only configuration is the public API origin.
 - **Logos:** uploads go app → API → private bucket (PNG, JPEG or WebP, checked by file signature, up to 512 KB). The app holds no cloud credentials.
@@ -458,6 +459,6 @@ The engine uses full-precision decimals and only rounds the payment and commissi
 - Preset lender logo images are not included; the brief gives only lender websites.
 - If the OS offers no secure storage, the session is kept in memory only, and the app says so.
 - NSW business-day dates cover 2025–2032.
-- Sign-in rate limits are per Cloud Run instance (at most 3); there is no Cloud Armor.
+- Rate limits are counted per Cloud Run instance (at most 3), so the effective limits can be up to 3× higher; there is no Cloud Armor.
 - The Windows installer isn't code-signed. The Mac image is only ad-hoc signed and isn't notarised (I don't have an Apple Developer ID), so the first time you open it macOS needs _System Settings → Privacy & Security → Open Anyway_. I haven't tested it on a Mac yet. Automatic updates are Windows-only, and 1.0.0 has no updater, so anyone on 1.0.0 has to install 1.1.0 manually once.
 - 5 of the 8 official finance test cases fail because their expected values contradict the brief's formulas. See _Finance validation_.

@@ -64,6 +64,12 @@ export async function createTestApp(): Promise<TestApp> {
       token: 10_000,
       logout: 10_000,
     },
+    protectedRateLimits: {
+      failedTokensPerIp: 10_000,
+      requestsPerAccount: 10_000,
+      writesPerAccount: 10_000,
+      logoTransfersPerAccount: 10_000,
+    },
   });
   await app.ready();
   return {

@@ -15,7 +15,8 @@ import type { DealService } from '../deals/deal-service.js';
 import type { AuthService } from '../identity/auth-service.js';
 import type { LenderService } from '../lenders/lender-service.js';
 import { maxLogoBytes } from '../storage/logo-storage.js';
-import { unauthenticated, validationFailed } from './errors.js';
+import { rateLimited, unauthenticated, validationFailed } from './errors.js';
+import { FixedWindowLimiter, overLimit } from './rate-limit.js';
 import { parse, principalOf } from './validation.js';
 
 /** Business services behind the authenticated routes. */
@@ -24,6 +25,40 @@ export interface ProtectedRouteServices {
   readonly deals: DealService;
   readonly lenders: LenderService;
 }
+
+/** Per-minute budgets for the signed-in routes, counted per instance (see rate-limit.ts). */
+export interface ProtectedRateLimits {
+  /**
+   * Bearer tokens per client IP that fail the session lookup. Once spent, further tokens
+   * from that IP are refused without touching the database until the window ends.
+   */
+  readonly failedTokensPerIp: number;
+  /** Every signed-in request, per account. */
+  readonly requestsPerAccount: number;
+  /** POST, PUT, PATCH and DELETE per account: each writes to the database. */
+  readonly writesPerAccount: number;
+  /** Logo downloads and uploads per account: up to 512 KB of egress or storage each. */
+  readonly logoTransfersPerAccount: number;
+}
+
+/**
+ * Production budgets, set well above real use: the app makes about four requests at
+ * start-up plus one per logo (cached for the session) and one per broker action, and its
+ * live preview runs locally. A refresh or sign-out elsewhere costs one failed lookup.
+ */
+export const defaultProtectedRateLimits: ProtectedRateLimits = {
+  failedTokensPerIp: 30,
+  requestsPerAccount: 300,
+  writesPerAccount: 60,
+  logoTransfersPerAccount: 120,
+};
+
+// HEAD runs the GET handler, which still reads the object from storage.
+const logoTransferRoutes = new Set([
+  'GET /v1/lenders/:id/logo',
+  'HEAD /v1/lenders/:id/logo',
+  'PUT /v1/lenders/:id/logo',
+]);
 
 const idParams = z.strictObject({ id: uuidSchema });
 const dealParams = z.strictObject({ dealId: uuidSchema });
@@ -39,17 +74,76 @@ function bearerToken(request: FastifyRequest): string | undefined {
 /**
  * Registers every route that needs a signed-in user. The scope's `onRequest` hook runs
  * before routing to handlers, so a route added here can never be reached anonymously.
+ * It also enforces the rate limits, before any body is parsed.
  */
 export function registerProtectedRoutes(
   app: FastifyInstance,
   services: ProtectedRouteServices,
+  rateLimits: Partial<ProtectedRateLimits> = {},
 ): void {
+  const minute = 60_000;
+  const perMinute = { ...defaultProtectedRateLimits, ...rateLimits };
+  const limits = {
+    failedTokens: new FixedWindowLimiter(perMinute.failedTokensPerIp, minute),
+    requests: new FixedWindowLimiter(perMinute.requestsPerAccount, minute),
+    writes: new FixedWindowLimiter(perMinute.writesPerAccount, minute),
+    logoTransfers: new FixedWindowLimiter(
+      perMinute.logoTransfersPerAccount,
+      minute,
+    ),
+  };
+
   app.register(async (scope) => {
-    scope.addHook('onRequest', async (request) => {
+    scope.addHook('onRequest', async (request, reply) => {
+      // A missing or malformed header costs nothing, so it is not counted.
       const token = bearerToken(request);
-      const principal = token ? await services.auth.authenticate(token) : null;
-      if (!principal) throw unauthenticated();
+      if (!token) throw unauthenticated();
+      // A well-formed token costs a database lookup, which anyone could otherwise trigger
+      // at will with made-up tokens. Once an IP has spent its failure budget, its tokens
+      // are refused here. Refusals count too, so only the first one is logged.
+      if (
+        limits.failedTokens.exhausted(request.ip) &&
+        overLimit(
+          limits.failedTokens,
+          request.ip,
+          'failed-tokens',
+          request,
+          reply,
+        )
+      )
+        throw rateLimited();
+      const principal = await services.auth.authenticate(token);
+      if (!principal) {
+        limits.failedTokens.hit(request.ip);
+        throw unauthenticated();
+      }
       request.principal = principal;
+
+      // Keyed by account, not token or IP: refreshing for new tokens or changing networks
+      // does not reset the budget, and brokers sharing an office IP do not share one.
+      const account = principal.userId;
+      const route = `${request.method} ${request.routeOptions.url}`;
+      if (
+        overLimit(limits.requests, account, 'account', request, reply) ||
+        (request.method !== 'GET' &&
+          request.method !== 'HEAD' &&
+          overLimit(
+            limits.writes,
+            account,
+            'account.writes',
+            request,
+            reply,
+          )) ||
+        (logoTransferRoutes.has(route) &&
+          overLimit(
+            limits.logoTransfers,
+            account,
+            'account.logo-transfers',
+            request,
+            reply,
+          ))
+      )
+        throw rateLimited();
     });
 
     scope.addContentTypeParser(

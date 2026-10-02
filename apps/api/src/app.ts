@@ -5,7 +5,10 @@ import type { FastifyInstance } from 'fastify';
 import { sqlState } from './db/database.js';
 import type { DealService } from './deals/deal-service.js';
 import { AppError } from './http/errors.js';
-import { registerProtectedRoutes } from './http/protected-routes.js';
+import {
+  registerProtectedRoutes,
+  type ProtectedRateLimits,
+} from './http/protected-routes.js';
 import type { AuthService } from './identity/auth-service.js';
 import {
   registerAuthRoutes,
@@ -24,6 +27,7 @@ export interface AppDependencies {
   readonly publicBaseUrl: URL;
   readonly devIdentityProvider: boolean;
   readonly authRateLimits?: Partial<AuthRateLimits>;
+  readonly protectedRateLimits?: Partial<ProtectedRateLimits>;
   /** True when the database answers; drives `/ready`. */
   readonly isReady: () => Promise<boolean>;
   readonly auth: AuthService;
@@ -58,6 +62,23 @@ function isUnavailable(error: unknown): boolean {
       error.code === 'ETIMEDOUT' ||
       error.code === 'ENOTFOUND')
   );
+}
+
+/**
+ * `/ready` is public, so callers must not be able to turn it into database load:
+ * concurrent probes share one check, and an answer is reused for `ttlMs`.
+ */
+function sharedProbe(
+  probe: () => Promise<boolean>,
+  ttlMs: number,
+): () => Promise<boolean> {
+  let latest: { at: number; answer: Promise<boolean> } | undefined;
+  return () => {
+    const now = Date.now();
+    if (!latest || now - latest.at >= ttlMs)
+      latest = { at: now, answer: probe().catch(() => false) };
+    return latest.answer;
+  };
 }
 
 /** Builds the stateless HTTP adapter. Business logic lives in services, not handlers. */
@@ -128,8 +149,9 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
   });
 
   app.get('/health', { logLevel: 'silent' }, () => ({ status: 'ok' }) as const);
+  const isReady = sharedProbe(dependencies.isReady, 1_000);
   app.get('/ready', { logLevel: 'silent' }, async (_request, reply) => {
-    const ready = await dependencies.isReady().catch(() => false);
+    const ready = await isReady();
     return reply
       .status(ready ? 200 : 503)
       .send({ status: ready ? 'ready' : 'unavailable' });
@@ -143,7 +165,7 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
       rateLimits: dependencies.authRateLimits,
     }),
   });
-  registerProtectedRoutes(app, dependencies);
+  registerProtectedRoutes(app, dependencies, dependencies.protectedRateLimits);
 
   app.setNotFoundHandler((request, reply) => {
     const body: ApiErrorDto = {

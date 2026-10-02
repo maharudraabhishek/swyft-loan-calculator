@@ -38,6 +38,10 @@ export const conflict = (message: string) =>
 export const unsupportedMediaType = (message: string) =>
   new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', message);
 
+/** 429: a rate limit was reached; the caller has already set `Retry-After`. */
+export const rateLimited = () =>
+  new AppError(429, 'RATE_LIMITED', 'Too many requests. Try again shortly.');
+
 /** 503: a dependency (database or storage) is temporarily unreachable. */
 export const serviceUnavailable = () =>
   new AppError(

@@ -3,6 +3,7 @@ import { buildApp } from './app.js';
 import type { ApiConfig } from './config.js';
 import { Database } from './db/database.js';
 import { DealService } from './deals/deal-service.js';
+import type { ProtectedRateLimits } from './http/protected-routes.js';
 import type { AuthRateLimits } from './identity/auth-routes.js';
 import { AuthService } from './identity/auth-service.js';
 import {
@@ -29,6 +30,7 @@ export interface Overrides {
   readonly identityProvider?: IdentityProvider;
   readonly logoStorage?: LogoStorage;
   readonly authRateLimits?: Partial<AuthRateLimits>;
+  readonly protectedRateLimits?: Partial<ProtectedRateLimits>;
 }
 
 /** Wires adapters to services. The only place that chooses concrete implementations. */
@@ -65,6 +67,9 @@ export function createApplication(
     devIdentityProvider: config.identity.kind === 'dev',
     ...(overrides.authRateLimits && {
       authRateLimits: overrides.authRateLimits,
+    }),
+    ...(overrides.protectedRateLimits && {
+      protectedRateLimits: overrides.protectedRateLimits,
     }),
     isReady: async () => {
       await database.ping();

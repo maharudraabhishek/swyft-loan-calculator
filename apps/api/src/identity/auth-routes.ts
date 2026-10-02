@@ -3,10 +3,10 @@ import {
   logoutRequestSchema,
   tokenRequestSchema,
 } from '@swyft/contracts';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { AppError } from '../http/errors.js';
-import { FixedWindowLimiter } from '../http/rate-limit.js';
+import { AppError, rateLimited } from '../http/errors.js';
+import { FixedWindowLimiter, overLimit } from '../http/rate-limit.js';
 import { parse } from '../http/validation.js';
 import type { AuthService } from './auth-service.js';
 import { IdentityVerificationError } from './identity-provider.js';
@@ -107,21 +107,6 @@ export function registerAuthRoutes(
     token: new FixedWindowLimiter(perMinute.token, minute),
     logout: new FixedWindowLimiter(perMinute.logout, minute),
   };
-  const retryAfter = (
-    limiter: FixedWindowLimiter,
-    request: FastifyRequest,
-    reply: FastifyReply,
-  ): number | null => {
-    const wait = limiter.hit(request.ip);
-    if (wait !== null) {
-      reply.header('retry-after', String(wait));
-      request.log.warn(
-        { code: 'RATE_LIMITED', route: request.routeOptions.url },
-        'Rate limited',
-      );
-    }
-    return wait;
-  };
   const tooManyPage = (reply: FastifyReply) =>
     page(
       reply,
@@ -129,11 +114,9 @@ export function registerAuthRoutes(
       'Too many sign-in attempts',
       '<p>Please wait a minute and try again.</p>',
     );
-  const tooMany = () =>
-    new AppError(429, 'RATE_LIMITED', 'Too many requests. Try again shortly.');
 
   app.get('/v1/auth/login', async (request, reply) => {
-    if (retryAfter(limits.login, request, reply) !== null)
+    if (overLimit(limits.login, request.ip, 'auth.login', request, reply))
       return tooManyPage(reply);
     const query = parse(loginStartQuerySchema, request.query);
     let started;
@@ -165,7 +148,7 @@ export function registerAuthRoutes(
   });
 
   app.get('/v1/auth/callback', async (request, reply) => {
-    if (retryAfter(limits.callback, request, reply) !== null)
+    if (overLimit(limits.callback, request.ip, 'auth.callback', request, reply))
       return tooManyPage(reply);
     reply.header('set-cookie', clearCookie);
     const cookie = readCookie(request.headers.cookie, cookieName);
@@ -191,7 +174,8 @@ export function registerAuthRoutes(
   });
 
   app.post('/v1/auth/token', async (request, reply) => {
-    if (retryAfter(limits.token, request, reply) !== null) throw tooMany();
+    if (overLimit(limits.token, request.ip, 'auth.token', request, reply))
+      throw rateLimited();
     const body = parse(tokenRequestSchema, request.body);
     if (body.grantType === 'authorization_code') {
       const tokens = await options.auth.exchangeCode(body);
@@ -204,7 +188,8 @@ export function registerAuthRoutes(
   });
 
   app.post('/v1/auth/logout', async (request, reply) => {
-    if (retryAfter(limits.logout, request, reply) !== null) throw tooMany();
+    if (overLimit(limits.logout, request.ip, 'auth.logout', request, reply))
+      throw rateLimited();
     const body = parse(logoutRequestSchema, request.body);
     await options.auth.logout(body.refreshToken);
     return reply.status(204).send();
